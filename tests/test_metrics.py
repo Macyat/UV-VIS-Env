@@ -105,7 +105,7 @@ def test_daily_r2_and_alarm():
 
 def test_params_yaml_loads_all_parameters():
     params = load_params()
-    for k in ["KMNO", "COD", "TN", "TP", "AN", "TUR"]:
+    for k in ["CODMn", "COD", "TN", "TP", "AN", "TUR"]:
         assert k in params and len(params[k].ranges) >= 3
 
 

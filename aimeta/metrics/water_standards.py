@@ -22,12 +22,14 @@ class WaterParam:
     abs_error_bound: float = 0.0  # 低浓度允许绝对误差
     mape_bound: float = 0.15      # 高浓度允许相对误差
     unit: str = "mg/L"
+    standard: str = ""            # 检出限的依据标准（溯源用）
 
     @classmethod
     def from_dict(cls, name: str, d: Dict) -> "WaterParam":
         return cls(name=name, **{k: v for k, v in d.items()
                                  if k in {"ranges", "lower_bound", "upper_bound",
-                                          "abs_error_bound", "mape_bound", "unit"}})
+                                          "abs_error_bound", "mape_bound", "unit",
+                                          "standard"}})
 
     @property
     def n_classes(self) -> int:

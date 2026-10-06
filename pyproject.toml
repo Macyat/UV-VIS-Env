@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aimeta"
 version = "0.1.0"
-description = "UV-Vis 光谱水质软测量算法库（Comprehensive Chemometrics 方法体系落地）"
+description = "Chemometrics library for UV-Vis spectroscopic water quality measurement"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
