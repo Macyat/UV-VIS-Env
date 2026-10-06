@@ -78,7 +78,7 @@ pred = predict(card, X)
 
 ```
 ai-meta/
-├── aimeta/
+├── aimeta/             算法库主包（内部结构见下）
 │   ├── core/            数据契约、注册表、模型产物（ModelCard）
 │   ├── preprocessing/   预处理算子与链（SG、DERIV、小波、SNV、MSC、缩放）
 │   ├── models/          模型库（线性 / GLM / 潜变量 / 核 / 树 / 神经网络）+ MCR 曲线分辨
@@ -92,10 +92,19 @@ ai-meta/
 │   ├── io/              配置加载、ARFF 读取
 │   ├── pipelines/       训练 / 模型筛选 / 推理
 │   └── cli.py           命令行入口
-├── configs/             参数定义、预处理链、仪器档案
-├── edge/                工控机运行时（依赖 numpy / scipy / PyWavelets）
-├── tests/               单元测试
-└── docs/                设计文档
+├── configs/            参数定义、预处理链、仪器档案
+├── standards/          各指标金标准（原 gold_standard）
+│   └── metrics/        按指标分目录存放金标准 PDF（10 份）
+├── edge/               工控机运行时（依赖 numpy / scipy / PyWavelets）
+├── deploy/             部署 SOP 文档
+│   ├── 标液模型部署和测试.docx
+│   └── 实际水样模型部署和测试.docx
+├── Data/               数据（样例 / 参考）
+├── docs/               设计文档
+├── tests/              单元测试
+├── river_inference.py  脱离 aimeta 的独立推理脚本（支持 pca / range 两种 variant）
+├── requirements.txt    river_inference.py 配套依赖（joblib / numpy / scikit-learn / scipy / pywavelets）
+└── pyproject.toml      打包配置
 ```
 
 ---
@@ -510,6 +519,7 @@ print(diag["method"], diag["shift_nm"], diag["reason"])
 | 基线平直度 | 空气 / 空白（100%T 参考，T = 透过率） | 多次重复测 100%T 参考线，逐波长跨重复 std 得基线重复性 `repeatability_max`；若给 ideal 值再算平均基线相对 ideal 的最大偏离 `deviation_max`（函数 `baseline_flatness`）。 | 重复性 ≤ 0.001（示例） |
 | 信噪比 | 稳定光源 / 纯水（或任意已知稳定信号） | 同条件重复测 ≥10 次，在指定波长（或全波段均值）上 `SNR = 信号均值 / 重复标准差`（ddof=1）；噪声为 0 时返回 `inf`（函数 `signal_to_noise`）。 | 越高越好 |
 | 分辨率 | 汞灯 / 氩灯等窄发射线光源 | 测发射线光谱，在峰 ±window 内抛物线细化峰高，线性插值求半高全宽 FWHM（nm）（函数 `resolution`）。 | FWHM ≤ 2 nm（1 nm 狭缝典型） |
+| 标液线性度（各波长） | 无 | 测各种物质标液的多浓度梯度光谱，自第三个浓度起对每个波长做线性回归并计算累计 R²（按浓度梯度逐步累加拟合，逐波长用 `sklearn.metrics.r2_score` 或 `np.polyfit` 求解）；输出各波长 R² 曲线。 | 按 R² 曲线定性判断，并结合高 R² 值连续波长区间（e.g. ≥ 0.999）判定线性范围。 |
 
 #### 参考实现
 ```python
@@ -584,7 +594,7 @@ ok, diff = verify_against_card(m, card, X_test)   # 应 <= 1e-8
 ### 独立推理脚本部署（river_inference.py，无需 aimeta）
 
 除 `edge/` 运行时外，仓库另提供脱离 aimeta 依赖树的独立推理脚本 `river_inference.py`
-（与 `requirements.txt` 一同置于仓库根目录；完整部署 SOP 见 `ai-meta-main/deploy/实际水样模型部署和测试.docx`）。它读取 ARFF 光谱、输出
+（与 `requirements.txt` 一同置于仓库根目录；完整部署 SOP 见 `deploy/实际水样模型部署和测试.docx` 与 `deploy/标液模型部署和测试.docx`）。它读取 ARFF 光谱、输出
 JSON 结果，支持 `--variant pca`（默认）与 `range`（原 Linux 流水线）。脚本自带全部预处理
 （Wiener → SG → 小波 → SNV），模型以 pickle/joblib 保存且已含 `MeanCenterer`/`YAutoScaler` 等 scaler，
 故**线性、随机森林、LightGBM、AdaBoost 等任意 sklearn 系模型都能直接加载预测**，不要求「仅线性模型」。
