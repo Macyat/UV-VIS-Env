@@ -3,8 +3,7 @@
 - ``deriv_gram``  MATLAB ``DERIV`` 的移植实现（Gram 多项式），
                   与 ``scipy.signal.savgol_filter`` 数值等价，由回归测试锁死
 - ``savgol``      scipy Savitzky-Golay 平滑/求导
-- ``wiener``      Wiener 自适应滤波（不可编译到 edge）
-- ``wavelet``     sym 小波软阈值去噪（不可编译到 edge）
+- ``wavelet``     sym 小波软阈值去噪（edge 端委托执行，需 PyWavelets）
 - ``snv``         标准正态变换，**严格逐条光谱**
 - ``msc``         多元散射校正
 - ``mean_center`` / ``column_scale``  列缩放
@@ -20,7 +19,7 @@ from typing import Optional
 
 import numpy as np
 import pywt
-from scipy.signal import savgol_filter, wiener as scipy_wiener
+from scipy.signal import savgol_filter
 
 from ..core.registry import PREPROC
 from .base import Transformer
@@ -173,19 +172,6 @@ class SavGol(Transformer):
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         return savgol(X, **self.params)
-
-
-@PREPROC.register("wiener", family="smooth", compilable=False)
-class Wiener(Transformer):
-    op = "wiener"
-
-    def __init__(self, mysize: Optional[int] = None, noise: Optional[float] = None):
-        super().__init__(mysize=mysize, noise=noise)
-
-    def transform(self, X: np.ndarray) -> np.ndarray:
-        return np.apply_along_axis(
-            lambda r: scipy_wiener(r, mysize=self.params["mysize"], noise=self.params["noise"]),
-            1, np.asarray(X, dtype=np.float64))
 
 
 @PREPROC.register("wavelet", family="denoise", compilable=False)

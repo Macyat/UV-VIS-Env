@@ -110,8 +110,8 @@ def build_chain(config: Iterable[Dict[str, Any]]) -> Pipeline:
 
 
 class compile_error(Exception):  # noqa: N801 - 保持小写以贴近 "compile" 语义
-    """chain 无法编译为 numpy-only 部署算子时抛出。
+    """链含未注册算子、或部署端缺少对应依赖时抛出。
 
-    例如 Wiener（自适应）与小波（需 pywt）不能编译成矩阵，
-    部署链必须改用可编译算子（SG 导数 / SNV / MSC / 中心化 / 标准化）。
+    纯 numpy 可编译算子（SG 导数 / SNV / MSC / 中心化 / 标准化）总是可用；
+    wavelet 等需外部库（PyWavelets）的算子，只有在目标机装好对应依赖时才可部署。
     """

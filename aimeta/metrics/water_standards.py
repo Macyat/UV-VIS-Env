@@ -13,27 +13,57 @@ import numpy as np
 
 @dataclass
 class WaterParam:
-    """一个水质参数的计量定义。"""
+    """一个水质参数的计量定义。
+
+    两道上限（见 ``apply_bounds``）：
+        - ``upper_bound`` 复核限：超过仍显示，但打 ``above_upper`` 标，交由人工 /
+          金标准确认（可能是真实污染，也可能是模型外推错误）。
+        - 死限：物理上不可能测得的值，不显示（``not_display``）。有效死限
+          ``min(设备死限, 河流死限)``，二者任一可手动覆盖默认。
+    """
 
     name: str
     ranges: List[float]          # 类别分界（GB3838 I/II/III/IV/V）
     lower_bound: float           # 检出限
-    upper_bound: float           # 量程上限
+    upper_bound: float           # 复核限（量程上限）
     abs_error_bound: float = 0.0  # 低浓度允许绝对误差
     mape_bound: float = 0.15      # 高浓度允许相对误差
     unit: str = "mg/L"
     standard: str = ""            # 检出限的依据标准（溯源用）
+    device_dead_bound: Optional[float] = None  # 设备死限手动覆盖（默认 2× 最高校准标样）
+    river_dead_bound: Optional[float] = None   # 河流死限手动覆盖（默认 2× 最差类别界）
 
     @classmethod
     def from_dict(cls, name: str, d: Dict) -> "WaterParam":
         return cls(name=name, **{k: v for k, v in d.items()
                                  if k in {"ranges", "lower_bound", "upper_bound",
                                           "abs_error_bound", "mape_bound", "unit",
-                                          "standard"}})
+                                          "standard", "device_dead_bound",
+                                          "river_dead_bound"}})
 
     @property
     def n_classes(self) -> int:
         return len(self.ranges) + 1
+
+    @property
+    def river_dead_default(self) -> Optional[float]:
+        """河流死限默认 = 2 × 最差类别界（2 × V类）。无 ranges 时为 None。"""
+        return 2.0 * float(max(self.ranges)) if self.ranges else None
+
+    def dead_bound(self, auto_device_dead: Optional[float] = None) -> Optional[float]:
+        """有效死限 = min(设备死限, 河流死限)。
+
+        设备死限：手动 ``device_dead_bound``，否则训练时算出的
+        ``auto_device_dead``（= 2 × 最高校准标样浓度）。
+        河流死限：手动 ``river_dead_bound``，否则 ``river_dead_default``（2 × V类）。
+        二者取较小值；若都缺则返回 None（不启用死限）。
+        """
+        device = self.device_dead_bound if self.device_dead_bound is not None \
+            else auto_device_dead
+        river = self.river_dead_bound if self.river_dead_bound is not None \
+            else self.river_dead_default
+        vals = [v for v in (device, river) if v is not None]
+        return float(min(vals)) if vals else None
 
 
 def classify(values: np.ndarray, param: WaterParam) -> np.ndarray:
@@ -42,27 +72,34 @@ def classify(values: np.ndarray, param: WaterParam) -> np.ndarray:
     return np.searchsorted(np.asarray(param.ranges, dtype=np.float64), v, side="right")
 
 
-def apply_bounds(pred: np.ndarray, lo: Optional[float], hi: Optional[float]):
-    """按检出限 / 量程上限处理预测值，并返回标记。
+def apply_bounds(pred: np.ndarray, lo: Optional[float], hi: Optional[float],
+                 dead: Optional[float] = None):
+    """按检出限 / 复核限 / 死限处理预测值，并返回标记（三区）。
 
     规则：
-        - 低于检出限 (lo)：替换为 ``lo / 2`` 作为替代值（避免把未检出
-          一律报成检出限值本身而系统性高估），并打 ``below`` 标
-        - 高于量程上限 (hi)：夹到 ``hi``，并打 ``above`` 标
-        - lo / hi 为 None 时该项不处理
+        - 低于检出限 (lo)：替换为 ``lo / 2``，并打 ``below_lod`` 标
+        - 复核区 ``(lo, hi]``：正常显示，无标
+        - 复核区 ``(hi, dead]``：保留原值（**不夹断**），打 ``above_upper`` 标，
+          表示"超出量程，需人工 / 金标准复核"
+        - 死区 ``(dead, +∞)``：物理上不可能测得，置 NaN（不显示），打
+          ``not_display`` 标
+        - lo / hi / dead 为 None 时对应项不处理
 
     Returns:
-        (pred_out, below_mask, above_mask)
+        (pred_out, below_lod_mask, above_upper_mask, not_display_mask)
     """
     pred = np.asarray(pred, dtype=np.float64).ravel()
     below = (pred < lo) if lo is not None else np.zeros(pred.shape, dtype=bool)
     above = (pred > hi) if hi is not None else np.zeros(pred.shape, dtype=bool)
+    dead_mask = (pred > dead) if dead is not None else np.zeros(pred.shape, dtype=bool)
+    # 死区以上不再算复核区（已被抑制）
+    above = above & ~dead_mask
     out = pred.copy()
     if lo is not None:
         out = np.where(below, lo / 2.0, out)
-    if hi is not None:
-        out = np.minimum(out, hi)
-    return out, below, above
+    if dead is not None:
+        out = np.where(dead_mask, np.nan, out)
+    return out, below, above, dead_mask
 
 
 def misclassification_matrix(y_true: np.ndarray, y_pred: np.ndarray,

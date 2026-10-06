@@ -2,10 +2,25 @@
 #
 # ranges:            GB3838 类别分界（I/II/III/IV/V）
 # lower_bound:       预测值下限，取国标实验室方法的检出限
-# upper_bound:       量程上限
+# upper_bound:       复核限（量程上限）：预测值超过它仍显示，但打"需复核"标，
+#                     交由人工 / 金标准确认（可能是真实污染，也可能是模型外推错误）
 # abs_error_bound:   低浓度允许绝对误差
 # mape_bound:        高浓度允许相对误差
 # standard:          检出限的依据标准（溯源用）
+#
+# device_dead_bound: 设备死限手动覆盖。默认不填 -> 不启用：设备死限须由校准标样
+#                     初始化流程确定（见 pipelines/train.py 的 calibration_upper，
+#                     设备死限 = 2 × 校准标样最高浓度）。未跑该流程时只用河流死限。
+#                     超出即吸光度饱和 / 超出方法量程，物理上不可能测得 —— 不显示。
+# river_dead_bound:  河流死限手动覆盖。默认不填 -> 2 × 最差类别界（2 × V类）。
+#                     这条河物理上不可能有的浓度 —— 不显示。
+# 有效死限 = min(设备死限, 河流死限)，二者取较小值；任一项手动填了就以手填为准。
+#
+# 三道处理（见 metrics.water_standards.apply_bounds）：
+#   预测 <  lower_bound        -> 替为 lower_bound/2，打 below_lod
+#   lower_bound ≤ 预测 ≤ upper -> 正常显示
+#   upper < 预测 ≤ 死限        -> 显示原值，打 above_upper（需复核）
+#   预测 > 死限                -> 不显示（NaN），打 not_display（物理不可能值）
 #
 # 注意区分两个"检出限"：
 #   1. lower_bound —— 国标**实验室方法**的检出限，用作报告口径：
@@ -18,7 +33,9 @@ params:
   CODMn:                # 高锰酸盐指数
     ranges: [2, 4, 6, 10, 15]
     lower_bound: 0.5    # GB 11892-89 未规定检出限，取测定范围下限（0.5~4.5 mg/L）
-    upper_bound: 22.5   # V类 15 × 1.5
+    upper_bound: 22.5   # V类 15 × 1.5（复核限）
+    device_dead_bound: null   # 默认 2× 最高校准标样；手动填可覆盖
+    river_dead_bound: null    # 默认 2× V类 = 30；手动填可覆盖
     abs_error_bound: 1
     mape_bound: 0.15
     standard: "GB 11892-89 高锰酸盐指数"
@@ -27,7 +44,9 @@ params:
   COD:                  # 化学需氧量
     ranges: [15, 15, 20, 30, 40]
     lower_bound: 4      # HJ 828-2017，取样体积 10.0 mL
-    upper_bound: 60     # V类 40 × 1.5
+    upper_bound: 60     # V类 40 × 1.5（复核限）
+    device_dead_bound: null
+    river_dead_bound: null    # 默认 2× V类 = 80
     abs_error_bound: 4
     mape_bound: 0.15
     standard: "HJ 828-2017 重铬酸盐法"
@@ -36,7 +55,9 @@ params:
   TN:                   # 总氮
     ranges: [0.2, 0.5, 1, 1.5, 2]
     lower_bound: 0.05   # HJ 636-2012，样品量 10 mL
-    upper_bound: 3      # V类 2 × 1.5
+    upper_bound: 3      # V类 2 × 1.5（复核限）
+    device_dead_bound: null
+    river_dead_bound: 10     # 总氮特殊：河流死限暂定 10（覆盖默认 2×V类=4）
     abs_error_bound: 0.1
     mape_bound: 0.3
     standard: "HJ 636-2012 碱性过硫酸钾消解紫外分光光度法"
@@ -45,7 +66,9 @@ params:
   TP:                   # 总磷
     ranges: [0.02, 0.1, 0.2, 0.3, 0.4]
     lower_bound: 0.01   # GB 11893-89，取 25 mL 试料
-    upper_bound: 0.6    # V类 0.4 × 1.5
+    upper_bound: 0.6    # V类 0.4 × 1.5（复核限）
+    device_dead_bound: null
+    river_dead_bound: null    # 默认 2× V类 = 0.8
     abs_error_bound: 0.02
     mape_bound: 0.15
     standard: "GB 11893-89 钼酸铵分光光度法"
@@ -54,7 +77,9 @@ params:
   AN:                   # 氨氮
     ranges: [0.15, 0.5, 1, 1.5, 2]
     lower_bound: 0.025  # HJ 535-2009，水样 50 mL、20 mm 比色皿
-    upper_bound: 3      # V类 2 × 1.5
+    upper_bound: 3      # V类 2 × 1.5（复核限）
+    device_dead_bound: null
+    river_dead_bound: null    # 默认 2× V类 = 4
     abs_error_bound: 0.2
     mape_bound: 0.15
     standard: "HJ 535-2009 纳氏试剂分光光度法"
@@ -64,8 +89,10 @@ params:
     ranges: [30, 50, 1000]
     lower_bound: 0.3    # HJ 1075-2019 浊度计法
     # 浊度不在 GB3838 类别体系内（无 V类限值），1000 为站点量程哨兵值；
-    # 保留站点量程上限 150 作为检测上限。
+    # 保留站点量程上限 150 作为检测上限（复核限）。
     upper_bound: 150
+    device_dead_bound: null
+    river_dead_bound: null    # 默认 2× 最差类别界 = 2000
     abs_error_bound: 5
     mape_bound: 0.15
     standard: "HJ 1075-2019 浊度计法"

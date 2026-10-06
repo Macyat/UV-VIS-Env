@@ -30,5 +30,6 @@ Thumbs.db
 # 模型产物与数据（真实站点数据不入库）
 *.pkl
 *.npz
-deploy/
+deploy/*          # 忽略 deploy/ 下生成的部署产物
+!deploy/*.docx   # 但放行部署说明文档（.docx）
 experiments/

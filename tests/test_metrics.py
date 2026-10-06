@@ -109,6 +109,33 @@ def test_params_yaml_loads_all_parameters():
         assert k in params and len(params[k].ranges) >= 3
 
 
+def test_dead_bound_defaults_and_override():
+    """有效死限 = min(设备死限, 河流死限)；手动覆盖优先于训练自动值。"""
+    p = WaterParam(name="TN", ranges=[0.2, 0.5, 1, 1.5, 2],
+                   lower_bound=0.05, upper_bound=3)
+    assert p.dead_bound(None) == 4.0        # 仅河流维 = 2×V类
+    assert p.dead_bound(3.0) == 3.0         # min(设备3, 河流4)
+    assert p.dead_bound(10.0) == 4.0        # min(设备10, 河流4)
+    # 手动覆盖：取 min，且忽略训练自动值
+    p2 = WaterParam(name="TN", ranges=[0.2, 0.5, 1, 1.5, 2],
+                    lower_bound=0.05, upper_bound=3,
+                    device_dead_bound=5.0, river_dead_bound=2.0)
+    assert p2.dead_bound(None) == 2.0
+    assert p2.dead_bound(100.0) == 2.0      # 手动优先于 auto
+
+
+def test_params_yaml_exposes_dead_bounds():
+    params = load_params()
+    for k in ["CODMn", "COD", "TN", "TP", "AN", "TUR"]:
+        p = params[k]
+        if k == "TN":
+            # 总氮特殊：河流死限暂定 10，覆盖默认 2×V类=4
+            assert p.dead_bound(1e9) == 10
+        else:
+            # 默认未手填 -> 河流死限 = 2 × 最差类别界（设备未初始化时为 None）
+            assert p.dead_bound(1e9) == 2.0 * max(p.ranges)
+
+
 def test_acceptance_report_runs_for_turbidity():
     """浊度只有 3 个分界，老代码在这里会索引越界 —— 这里必须不崩。"""
     params = load_params()

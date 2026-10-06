@@ -1,0 +1,14 @@
+{
+  "source": "D:\\Enveda CASMI 2026\\ai-meta-main\\input_data\\merge_data_xikeng.csv",
+  "source_rows": 437,
+  "n_wavelengths": 611,
+  "wavelength_range_nm": [
+    190,
+    800
+  ],
+  "wavelength_step_nm": 1,
+  "spectra_columns": "wavelength_1 .. wavelength_611",
+  "target": "TN",
+  "nan_in_TN": 9,
+  "note": "TN 缺失的 9 行需在训练前剔除（~np.isnan(tn) 掩码）。"
+}

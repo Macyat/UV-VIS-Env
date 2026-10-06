@@ -35,24 +35,33 @@ from aimeta.pipelines.train import train_model
 from aimeta.pipelines.infer import predict
 
 # 1. 准备数据：吸光度矩阵 + 波长轴 + 标签
-X = np.load("spectra.npy")          # (n_samples, n_wavelengths)
-wl = np.load("wavelengths.npy")     # (n_wavelengths,)
-y = np.load("tn.npy")               # (n_samples,)
-spectra = SpectrumSet(X=X, wavelengths=wl, y=y)
+#    示例数据见 Data/Example1/（西坑站：437 样本 × 611 波长 190–800 nm，目标 TN）
+X = np.load("Data/Example1/spectra.npy")        # (n_samples, n_wavelengths)
+wl = np.load("Data/Example1/wavelengths.npy")   # (n_wavelengths,) = 190..800 nm
+tn = np.load("Data/Example1/tn.npy")            # (n_samples,)
+mask = ~np.isnan(tn)                            # 剔除参考值缺失的 9 个样本
+X, tn = X[mask], tn[mask]
+spectra = SpectrumSet(X=X, wavelengths=wl, y=tn)
 
 # 2. 取参数定义与预处理链（configs/）
 params = load_params()
 chain = load_chain(name="preprocessing/dayu_edge.yaml")
 
 # 3. 训练
+#    方式 A（推荐）：不传 n_components，按 PLS_toolbox 惯例 CV 遍历 1..20 取误差最小的维数
 card = train_model(
     spectra, label="TN", model_key="pls",
     chain=chain,
-    model_params={"n_components": 10},
     param_def=params["TN"],
     instrument_id="ai14",
 )
-print(card)          # <ModelCard TN/pls @ai14 fp=a1bd620a4660a3ac rmse_cv=0.0412>
+#    方式 B（手动指定）：显式给定维数，以手填为准（覆盖自动选维）
+#    card = train_model(
+#        spectra, label="TN", model_key="pls",
+#        chain=chain, model_params={"n_components": 8},
+#        param_def=params["TN"], instrument_id="ai14",
+#    )
+print(card)          # <ModelCard TN/pls @ai14 ... n_components=11 rmse_cv=0.11>
 
 # 4. 推理（自动套用卡内记录的预处理链）
 pred = predict(card, X)
@@ -66,7 +75,7 @@ pred = predict(card, X)
 ai-meta/
 ├── aimeta/
 │   ├── core/            数据契约、注册表、模型产物（ModelCard）
-│   ├── preprocessing/   预处理算子与链（SG、DERIV、Wiener、小波、SNV、MSC、缩放）
+│   ├── preprocessing/   预处理算子与链（SG、DERIV、小波、SNV、MSC、缩放）
 │   ├── models/          模型库（线性 / GLM / 潜变量 / 核 / 树 / 神经网络）+ MCR 曲线分辨
 │   ├── selection/       波长选择（CARS、稳定性与置换检验）
 │   ├── transfer/        仪器间模型迁移（SBC / DS / PDS / GLSW / 均值方差对齐）
@@ -78,7 +87,7 @@ ai-meta/
 │   ├── pipelines/       训练 / 模型筛选 / 推理
 │   └── cli.py           命令行入口
 ├── configs/             参数定义、预处理链、仪器档案
-├── edge/                工控机运行时（仅依赖 numpy）
+├── edge/                工控机运行时（依赖 numpy / scipy / PyWavelets）
 ├── tests/               单元测试
 └── docs/                设计文档
 ```
@@ -147,7 +156,6 @@ pipe.to_config()        # [{'op': 'savgol', 'window': 15, 'polyorder': 3, 'deriv
 | `snv` | 标准正态变换（逐条光谱） | 是 |
 | `msc` | 多元散射校正 | 是 |
 | `mean_center` / `column_scale` | 列中心化 / 列标准化 | 是 |
-| `wiener` | Wiener 自适应滤波 | 否 |
 | `wavelet` | 小波软阈值去噪（`sym4`） | 否 |
 
 ### 建模与模型筛选
@@ -304,7 +312,7 @@ python -m aimeta.cli transfer --slave ai17           # 查看某台仪器的迁�
 | 文件 | 内容 |
 |---|---|
 | `configs/params.yaml` | 各水质参数的量程、类别分界、检出限、误差限 |
-| `configs/preprocessing/dayu_v1.yaml` | 训练用链：`wiener → savgol → wavelet → snv` |
+| `configs/preprocessing/dayu_v1.yaml` | 训练用链：`savgol → wavelet → snv` |
 | `configs/preprocessing/dayu_edge.yaml` | 部署用链：`savgol → snv` |
 | `configs/instruments/*.yaml` | 每台仪器的波长轴、光程、迁移参数 |
 
@@ -331,7 +339,7 @@ python -m aimeta.cli transfer --slave ai17           # 查看某台仪器的迁�
 
 ## 部署到工控机
 
-`edge/` 是独立的极简运行时，**只依赖 numpy**，可单独拷贝到工控机。
+`edge/` 是独立的极简运行时，部署端依赖与 aimeta 一致（numpy / scipy / PyWavelets）；纯 numpy 可编译算子构成的链仍可脱离 scipy/pywt 单独运行。
 仅支持线性模型（PLS / Ridge / Lasso / OLS / PCR）与可编译算子。
 
 ```python
@@ -375,13 +383,18 @@ python -m pytest -q
 
 ## 注意事项
 
-- **`wiener` 与 `wavelet` 不能部署到工控机**（前者是自适应滤波，后者需要 PyWavelets）。
-  导出时会抛 `CompileError`，部署链请使用 `savgol` / `deriv_gram`。
+- **部署端依赖与 aimeta 一致（numpy / scipy / PyWavelets）**。
+  纯 numpy 可编译算子（``savgol`` / ``snv`` / ``msc`` / 缩放）仍走零依赖快路径；
+  ``wavelet`` 等需外部库的算子会委托注册算子执行，工控机需装好对应依赖
+  （aimeta 主依赖已含 scipy / PyWavelets，``pip install aimeta`` 即满足）。
 - **`snv` 是逐条光谱标准化**；若需要对整个矩阵做列标准化，请用 `column_scale`。
 - **`edge` 只支持线性模型**。非线性模型（GPR、LGBM、MLP）需在工控机上安装完整依赖后
   直接使用 `ModelCard`。
 - **迁移需要配对样本**：至少 5 个在两台仪器上均测过的样本；不足时只能用
   `SlopeBiasCorrection` 做响应校正。
-- **`ModelCard` 会校验波长轴**：推理时波长数与卡内记录不一致会直接报错。
+- **`ModelCard` 会校验波长轴**：推理时**波长数量**（`X` 的列数）与卡内记录不等会直接报错；
+  若调用 `predict` 时还传入了 `wavelengths`（或用带波长轴的 `SpectrumSet`），则进一步比对
+  **具体波长值**是否落在训练网格上（`np.allclose`）。只喂 `X` 不传波长时仅验数量，
+  波长网格被重采样/错位不会被发现——生产部署建议始终传入波长轴。
 - **算品质因数时，空白样本必须先过预处理链**。若直接喂原始光谱，
   预测值可能落在检出限以下被替为 LOD/2，导致灵敏度与 LOD 退化为 `inf`（此时会给出告警）。

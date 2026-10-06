@@ -6,10 +6,9 @@
 # 其中 river_inference.py 的 pca 变体把 SNV 做成「全矩阵全局标准化」，
 # 与其他位置的「逐条光谱 SNV」语义不同 —— 本配置把语义钉死为 per_spectrum。
 #
-# 注意：本链含 wiener 与 wavelet，二者无法编译到 edge 运行时；
+# 注意：本链含 wavelet（需 PyWavelets），edge 端会委托注册算子执行（需目标机装 pywt）；
 # 部署请用 dayu_edge.yaml。
 chain:
-  - op: wiener
   - op: savgol
     window: 15
     polyorder: 3

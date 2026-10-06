@@ -1,6 +1,6 @@
 """WaterQualityModel：x/y 缩放 + 检出限/量程上限处理的包装器。
 
-统一训练与推理时的缩放方式，并支持导出为 numpy-only 的部署产物
+统一训练与推理时的缩放方式，并支持导出为工控机部署产物（依赖与 aimeta 一致）
 （见 ``edge/runtime.py``）。
 """
 from __future__ import annotations
@@ -24,10 +24,12 @@ class WaterQualityModel:
     """
 
     def __init__(self, estimator, lower_bound: Optional[float] = None,
-                 upper_bound: Optional[float] = None):
+                 upper_bound: Optional[float] = None,
+                 dead_bound: Optional[float] = None):
         self.estimator = estimator
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
+        self.dead_bound = dead_bound
         self.x_mean_: Optional[np.ndarray] = None
         self.y_mean_: float = 0.0
         self.y_scale_: float = 1.0
@@ -50,7 +52,8 @@ class WaterQualityModel:
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         pred = self.predict_raw(X)
-        out, _, _ = apply_bounds(pred, self.lower_bound, self.upper_bound)
+        out, *_ = apply_bounds(pred, self.lower_bound, self.upper_bound,
+                               self.dead_bound)
         return out
 
     # ---- 供 edge 导出 ----

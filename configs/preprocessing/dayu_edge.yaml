@@ -1,10 +1,10 @@
 # 可部署到工控机的预处理链
 #
-# 与 dayu_v1 的差别：去掉 wiener（自适应、非线性）与 wavelet（需 pywt），
-# 只保留可编译成矩阵的 savgol 与可逐行闭式计算的 snv。
+# 精简部署链（可选）：只保留计算最轻、零额外依赖的 savgol 与 snv。
 #
-# 这不是偷懒，而是把约束显式化：edge/runtime.py 只依赖 numpy，
-# 无法执行 Wiener 的噪声自适应与小波阈值。
+# 与 dayu_v1 的差别在于不含 wavelet（需 PyWavelets、逐条光谱执行）。
+# 现 edge 运行时已支持委托执行 wavelet 等需外部库的算子，因此 wavelet
+# 也可部署——本文件只是"最轻量"的可选预设，而非强制要求。
 # 上线前必须用 verify_against_card 量化两条链在本机数据上的差异。
 chain:
   - op: savgol

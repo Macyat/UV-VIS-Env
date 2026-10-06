@@ -3,7 +3,7 @@
 三份配置对应三类本来硬编码在代码里的东西：
 
     configs/params.yaml              老 preprocessing.get_configs() 的六个 elif
-    configs/preprocessing/*.yaml     散落五处的 Wiener→SG→小波→SNV
+    configs/preprocessing/*.yaml     散落五处的 SG→小波→SNV
     configs/instruments/*.yaml       每台工控机的档案与迁移参数
 """
 from __future__ import annotations

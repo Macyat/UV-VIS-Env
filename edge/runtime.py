@@ -1,13 +1,18 @@
-"""numpy-only 的部署运行时（可整体拷贝到工控机）。
+"""工控机部署运行时（依赖与 aimeta 一致：numpy / scipy / PyWavelets）。
 
 设计
 ----
 * 只支持**线性**模型：PLS / Ridge / Lasso / OLS / PCR，本质 ``y = X@coef + b``
-* 只支持**可编译**的预处理算子：
-  ``savgol``（编译成权重矩阵，用纯 numpy 计算，不依赖 scipy）
-  ``snv`` ``msc`` ``mean_center`` ``column_scale``
-* ``wiener``（自适应）与 ``wavelet``（需 pywt）不可编译 → 抛 ``CompileError``
-  （这正是 configs/preprocessing/dayu_edge.yaml 存在的原因）
+* 预处理算子分两类：
+  - **纯 numpy 可编译**：``savgol`` / ``deriv_gram``（编译成权重矩阵）、
+    ``snv`` ``msc`` ``mean_center`` ``column_scale``（闭式计算），部署端零额外依赖；
+  - **需要外部库的算子**（如 ``wavelet`` 需 PyWavelets）：编译为"委托"算子，
+    部署端运行时调用注册算子执行，因此需要目标机安装对应依赖
+    （aimeta 已将 scipy / PyWavelets 列为主依赖，``pip install aimeta`` 即满足）。
+
+纯 numpy 链（如 dayu_edge.yaml）仍可完全脱离 scipy/pywt 运行；
+只有用了 wavelet 这类算子的链才需要对应库。
+
 
 产物目录
 --------
@@ -30,13 +35,37 @@ _COMPILABLE = {"savgol", "deriv_gram", "snv", "msc", "mean_center", "column_scal
 
 
 class CompileError(Exception):
-    """链无法编译为 numpy-only 算子时抛出。"""
+    """预处理链含未注册算子、或部署端缺少对应依赖时抛出。
+
+    纯 numpy 可编译算子（savgol / snv / msc / …）总是可用；
+    wavelet 等需外部库的算子只有在目标机装好对应依赖（scipy / PyWavelets）时才可部署。
+    """
 
     pass
 
 
 # 兼容旧名（早期草稿里用过小写别名）
 compile_error = CompileError
+
+
+def _is_delegable(op: str) -> bool:
+    """op 是否为已注册、且需要外部库（scipy / pywt 等）的预处理算子。
+
+    纯 numpy 可编译算子走 ``_COMPILABLE`` 快路径；其余已注册算子（如 wavelet）
+    在部署端委托给注册算子执行，需目标机安装对应依赖。aimeta 未安装时返回
+    False，使纯 numpy 链仍可脱离 aimeta 独立运行。
+    """
+    try:
+        from aimeta.preprocessing.operators import PREPROC
+    except Exception:
+        return False
+    return op in PREPROC
+
+
+def _apply_op(op_name: str, params: Dict[str, Any], X: np.ndarray) -> np.ndarray:
+    """调用注册算子执行（用于需要外部库的预处理，如 wavelet）。"""
+    from aimeta.preprocessing.operators import PREPROC
+    return PREPROC.build(op_name, **params).transform(X)
 
 
 # ------------------------------------------------------------ Savitzky-Golay
@@ -83,34 +112,37 @@ def compile_chain(chain: List[Dict[str, Any]], n_wavelengths: int) -> List[Dict[
     for raw in chain:
         item = dict(raw)
         op = item.pop("op")
-        if op not in _COMPILABLE:
+        if op in _COMPILABLE:
+            if op in ("savgol", "deriv_gram"):
+                W = sg_matrix(
+                    n_wavelengths,
+                    window=int(item.get("window", 15)),
+                    polyorder=int(item.get("polyorder", item.get("order", 3))),
+                    deriv=int(item.get("deriv", item.get("der", 0))),
+                )
+                compiled.append({"kind": "matmul", "W": W})
+            elif op == "snv":
+                compiled.append({"kind": "snv"})
+            elif op == "msc":
+                compiled.append({"kind": "msc"})
+            else:   # mean_center / column_scale，具体数值在 fit 后填入
+                compiled.append({"kind": "affine",
+                                 "scale": np.ones(n_wavelengths),
+                                 "shift": np.zeros(n_wavelengths)})
+        elif _is_delegable(op):
+            # 需要 scipy / pywt 等外部库的算子：运行时委托给注册算子执行。
+            compiled.append({"kind": "op", "op": op, "params": item})
+        else:
             raise CompileError(
-                f"op {op!r} cannot be compiled for edge runtime "
-                f"(compilable: {sorted(_COMPILABLE)}). "
-                "Use savgol/deriv_gram instead of wiener/wavelet."
+                f"op {op!r} is not a registered preprocessing operator "
+                f"(compilable: {sorted(_COMPILABLE)})."
             )
-        if op in ("savgol", "deriv_gram"):
-            W = sg_matrix(
-                n_wavelengths,
-                window=int(item.get("window", 15)),
-                polyorder=int(item.get("polyorder", item.get("order", 3))),
-                deriv=int(item.get("deriv", item.get("der", 0))),
-            )
-            compiled.append({"kind": "matmul", "W": W})
-        elif op == "snv":
-            compiled.append({"kind": "snv"})
-        elif op == "msc":
-            compiled.append({"kind": "msc"})
-        else:   # mean_center / column_scale，具体数值在 fit 后填入
-            compiled.append({"kind": "affine",
-                             "scale": np.ones(n_wavelengths),
-                             "shift": np.zeros(n_wavelengths)})
     return compiled
 
 
 # --------------------------------------------------------------- 模型本体
 class LinearEdgeModel:
-    """numpy-only 的线性软测量模型。
+    """工控机部署用线性软测量模型（部署端依赖与 aimeta 一致）。
 
     Example::
 
@@ -128,6 +160,7 @@ class LinearEdgeModel:
         label: str = "",
         lower_bound: Optional[float] = None,
         upper_bound: Optional[float] = None,
+        dead_bound: Optional[float] = None,
     ) -> None:
         self.ops = ops
         self.coef = np.asarray(coef, dtype=np.float64).ravel()
@@ -137,6 +170,7 @@ class LinearEdgeModel:
         self.label = label
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
+        self.dead_bound = dead_bound
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         X = np.asarray(X, dtype=np.float64)
@@ -162,6 +196,8 @@ class LinearEdgeModel:
                     ref = X.mean(axis=0)
                 A = np.vstack([ref, np.ones_like(ref)]).T
                 X = np.vstack([_msc_row(r, A) for r in X])
+            elif k == "op":
+                X = _apply_op(op["op"], op.get("params", {}), X)
         return X
 
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -170,8 +206,9 @@ class LinearEdgeModel:
         if self.lower_bound is not None:
             below = y < self.lower_bound
             y = np.where(below, self.lower_bound / 2.0, y)   # 未检出替为 LOD/2
-        if self.upper_bound is not None:
-            y = np.minimum(y, self.upper_bound)
+        # 复核区 (upper, dead]：保留原值（交给人工复核），不夹断
+        if self.dead_bound is not None:
+            y = np.where(y > self.dead_bound, np.nan, y)      # 死区不显示
         return y
 
     # ---- 序列化 ----
@@ -197,6 +234,8 @@ class LinearEdgeModel:
                     ops_meta.append({"kind": k, "ref": f"r{i}"})
                 else:
                     ops_meta.append({"kind": k})
+            elif k == "op":
+                ops_meta.append({"kind": k, "op": op["op"], "params": op["params"]})
             else:
                 ops_meta.append({"kind": k})
         np.savez(d / "arrays.npz", **arrays)
@@ -206,6 +245,7 @@ class LinearEdgeModel:
             "intercept": self.intercept,
             "lower_bound": self.lower_bound,
             "upper_bound": self.upper_bound,
+            "dead_bound": self.dead_bound,
             "ops": ops_meta,
             "version": 1,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -227,6 +267,8 @@ class LinearEdgeModel:
             elif k == "msc":
                 ops.append({"kind": k,
                             "ref": z[m["ref"]] if "ref" in m else None})
+            elif k == "op":
+                ops.append({"kind": k, "op": m["op"], "params": m["params"]})
             else:
                 ops.append({"kind": k})
         return LinearEdgeModel(
@@ -234,6 +276,7 @@ class LinearEdgeModel:
             wavelengths=z["wavelengths"], fingerprint=mf["fingerprint"],
             label=mf["label"], lower_bound=mf["lower_bound"],
             upper_bound=mf["upper_bound"],
+            dead_bound=mf.get("dead_bound", None),
         )
 
 
@@ -285,15 +328,20 @@ def export_card(card, model_dir: str | Path,
         fingerprint=card.fingerprint(), label=card.label,
         lower_bound=getattr(wm, "lower_bound", None),
         upper_bound=getattr(wm, "upper_bound", None),
+        dead_bound=getattr(wm, "dead_bound", None),
     )
     return m.save(model_dir)
 
 
 def verify_against_card(edge_model: LinearEdgeModel, card, X: np.ndarray,
                         atol: float = 1e-8) -> Tuple[bool, float]:
-    """train/serve 一致性校验：edge 预测 vs 训练端预测应逐元素一致。"""
+    """train/serve 一致性校验：edge 预测 vs 训练端预测应逐元素一致。
+
+    死区内的预测在两端都是 NaN，按"相等"处理，故只比较两端都有限的样本。
+    """
     from aimeta.pipelines.infer import predict
     a = predict(card, X)
     b = edge_model.predict(X)
-    diff = float(np.max(np.abs(a - b)))
+    finite = np.isfinite(a) & np.isfinite(b)
+    diff = float(np.max(np.abs(a[finite] - b[finite]))) if finite.any() else 0.0
     return bool(diff <= atol), diff
