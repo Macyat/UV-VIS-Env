@@ -40,7 +40,7 @@ wl = np.load("wavelengths.npy")     # (n_wavelengths,)
 y = np.load("tn.npy")               # (n_samples,)
 spectra = SpectrumSet(X=X, wavelengths=wl, y=y)
 
-# 2. 取参数定义与预处理链（都在 configs/ 里，改配置不用改代码）
+# 2. 取参数定义与预处理链（configs/）
 params = load_params()
 chain = load_chain(name="preprocessing/dayu_edge.yaml")
 
