@@ -105,6 +105,7 @@ ai-meta/
 │   ├── test_registry.py
 │   ├── test_transfer.py             # 合成双仪器：DS/PDS 应把预测偏差降到阈值以下
 │   └── test_fom.py
-├── gold_standard/                  # 化学法金标准依据（GB3838 阈值 + HJ 915.3-2024 程序）
+├── standards/                      # 金标准依据（化学法 / 标准物质 / 检定规程）
+│   └── metrics/                    # 各指标金标准 PDF（GB3838 阈值 + HJ 915.3-2024 程序 + 各参数 HJ/GB 方法）
 ├── docs/
 └── pyproject.toml                   # 声明包、依赖分组、entry_points
