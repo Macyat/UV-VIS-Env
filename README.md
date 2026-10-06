@@ -7,7 +7,7 @@ UV-Vis 光谱水质在线监测算法库。覆盖从硬件评价、光谱预处�
 
 > **术语约定**：本库大量使用光谱计量与国标专有名词（FOM、空白、死限、复核限、达标率、日级 R² 等）。
 > 阅读代码或配置前，请先浏览 [`docs/术语表.md`](docs/术语表.md)，避免口径混淆。
-> 质量评价分两层——**分析方法品质因数（FOM）**与**光谱仪硬件评价**，详见「质量评价：分析方法与仪器硬件」一节。
+> 质量评价分为两层——**分析方法品质因数（FOM）**与**光谱仪硬件评价**，详见「质量评价：分析方法与仪器硬件」一节。
 
 ---
 
@@ -29,7 +29,7 @@ pip install pytest                # 运行测试
 
 ---
 
-## 5 分钟上手
+## 快速上手
 
 ```python
 import numpy as np
@@ -59,7 +59,7 @@ card = train_model(
     param_def=params["TN"],
     instrument_id="ai14",
 )
-#    方式 B（手动指定）：显式给定维数，以手填为准（覆盖自动选维）
+#    方式 B（手动指定）：显式给定维数，以显式指定为准（覆盖自动选维）
 #    card = train_model(
 #        spectra, label="TN", model_key="pls",
 #        chain=chain, model_params={"n_components": 8},
@@ -70,7 +70,7 @@ print(card)          # <ModelCard TN/pls @ai14 ... n_components=11 rmse_cv=0.11>
 # 4. 推理（自动套用卡内记录的预处理链）
 pred = predict(card, X)
 ```
-备注：此例子仅为简易建模示例，未对按数据分布对数据进行选取，亦未含验证集。鲁棒建模需要避免仅选取高相似数据，例如实验室样本需要考虑样本代表性（e.g.SPXY），河流样本需要按时间序列处理方式交叉验证（Walk-forward validation：rolling/expanding）。
+备注：该示例仅用于演示建模流程，未按数据分布划分样本，亦未设置验证集。鲁棒建模应避免仅选取高相似样本：实验室样本需考虑代表性抽样（如 SPXY），河流样本应按时间序列进行 Walk-forward 交叉验证（rolling / expanding）。
 
 ---
 
@@ -150,7 +150,7 @@ spectra.sort_by("timestamp")            # 按时间排序
 
 ### 预处理链
 
-链用配置描述，可被序列化回配置，训练与部署共用同一份定义。
+预处理链以配置描述，可序列化回配置，训练与部署共用同一份定义。
 
 ```python
 from aimeta.preprocessing.base import Pipeline
@@ -202,8 +202,8 @@ class MyModel:
 
 ### 候选池、打分表与 TOP K 融合
 
-不止单链 `sweep`：跨「预处理链 × 模型」全量枚举候选池，按验收指标全集打分排名，
-挑 TOP K 做精度加权（1/RMSE²）融合，并给每个候选导出一套诊断图。
+除单链 `sweep` 外，还支持跨「预处理链 × 模型」全量枚举候选池，按验收指标全集打分排名，
+选取 TOP K 做精度加权（1/RMSE²）融合，并为每个候选导出一套诊断图。
 
 ```python
 from aimeta.pipelines.train import sweep_grid
@@ -235,7 +235,7 @@ export_top_k_report(cards, X_val, y_val, params["TN"], out_dir, k=3, day_idx=day
 
 ### 仪器间模型迁移
 
-把 A 机器上的模型用到 B 机器，避免每台设备重新训练。
+将 A 仪器上的模型迁移至 B 仪器，避免每台设备重复训练。
 前提是一批**在两台仪器上都测过**的样本（可用同一套标液获得）。
 
 ```python
@@ -244,7 +244,7 @@ from aimeta.transfer.standardization import (
 )
 from aimeta.transfer.diagnose import recommend_method
 
-# 先看差在哪，再决定用什么方法
+# 先诊断差异，再选择迁移方法
 print(recommend_method(wl, X_slave, X_master, n_std_samples=len(X_slave)))
 # {'method': 'pds', 'window': 5, 'shift_nm': 0.0, 'reason': '样本 40 < 波长数 251，用窗口回归的 PDS'}
 
@@ -257,11 +257,11 @@ X_slave_corr = pds.transform(X_slave)                  # 之后即可套用主�
 |---|---|---|
 | `SlopeBiasCorrection` | >= 2 | 只有两台机的预测值，无配对光谱 |
 | `PiecewiseDirectStandardization` | >= 5 | 通用；能处理随波长变化的差异 |
-| `DirectStandardization` | >= 波长数 | 差异是全局线性的，参数更省 |
-| `GLSW` | >= 5 | 只想压掉仪器差异子空间 |
-| `MeanVarianceAlign` | >= 2 | 极简兜底 |
+| `DirectStandardization` | >= 波长数 | 差异为全局线性，参数更少 |
+| `GLSW` | >= 5 | 用于抑制仪器差异子空间 |
+| `MeanVarianceAlign` | >= 2 | 最简备选 |
 
-备注：大多数测河水场景不具备迁移可行性，不同河流配置不同设备，河流基体存在差异，此场景需要同时迁移测量系统和被测系统，一维光谱无法提供足够信息表征。
+备注：多数河流水样场景不具备迁移可行性——不同河流配置不同设备，且河流基体存在差异，需同时迁移测量系统与被测系统，而一维光谱不足以表征这些差异。
 
 ### 计量验收
 
@@ -290,7 +290,7 @@ from aimeta.monitoring import MSPC, shewhart_limits, cusum
 
 m = MSPC(n_components=5).fit(X_normal)      # 用正常时期的光谱建模
 r = m.monitor(X_new)
-r["spe_alarm"]      # 是否出现异常（探头污染、气泡、异物常体现在这里）
+r["spe_alarm"]      # 是否出现异常（探头污染、气泡、异物通常由此体现）
 r["contribution"]   # 各波长对异常的贡献，用于定位问题波段
 
 cl, lcl, ucl = shewhart_limits(pred_series)  # 预测值序列的控制限（含自相关修正）
@@ -319,7 +319,7 @@ from aimeta.selection import CARS, permutation_test
 sel = CARS(n_iter=30, n_components=10).fit(X, y)
 X_sel = sel.transform(X)
 
-# 检验选出的波长是不是碰巧（打乱标签重跑，比较分数分布）
+# 检验所选波长是否由偶然因素产生（置换标签后重跑，比较分数分布）
 res = permutation_test(lambda: CARS(n_iter=10, n_components=5), score_fn, X, y)
 print(res["score"], res["p_value"])
 ```
@@ -382,27 +382,27 @@ python -m aimeta.cli transfer --slave ai17           # 查看某台仪器的迁�
 | 氨氮 | 0.025 mg/L | HJ 535-2009（50 mL、20 mm 比色皿） |
 | 浊度 | 0.3 NTU | HJ 1075-2019 |
 
-需要注意：这是**实验室参考方法**的检出限，不是光谱模型自身的检出限。
-后者与仪器噪声、预处理和回归向量有关，通常远大于前者，
-严格来讲应用 `metrics.figures_of_merit` 从数据计算（见下节「质量评价：分析方法与仪器硬件」）。
+需注意：这是**实验室参考方法**的检出限，并非光谱模型自身的检出限。
+后者取决于仪器噪声、预处理与回归向量，通常显著高于前者，
+严格而言应使用 `metrics.figures_of_merit` 从数据计算（见下节「质量评价：分析方法与仪器硬件」）。
 
 ---
 
 ## 质量评价：分析方法与仪器硬件
 
-本库把"好不好"拆成**两层**，请分别看待、不要混为一谈：
+本库将质量评价分为两个层次，二者应分别考量：
 
-- **方法层（分析方法品质因数，FOM）**：评价你建的多元校正**模型**本身——灵不灵敏、能检多低、抗不抗干扰。
-- **硬件层（光谱仪评价）**：评价**仪器**本身的状态与跨机一致性——波长准不准、增益稳不稳、噪声大不大。
+- **方法层（分析方法品质因数，FOM）**：评价所建多元校正**模型**的性能——灵敏度、检出限与抗干扰能力。
+- **硬件层（光谱仪评价）**：评价**仪器**自身状态与跨机一致性——波长准确度、增益稳定性与噪声水平。
 
-评价顺序建议：**先确认硬件 / 跨机一致 → 再算方法 FOM**（硬件噪声是方法 `s_x` 的来源之一；波长漂移不修会直接污染建模）。
+建议评价顺序为**先确认硬件与跨机一致性，再计算方法 FOM**（硬件噪声是方法 `s_x` 的来源之一；波长漂移若未校正将直接影响建模质量）。
 
 ---
 
 ### 1. 分析方法品质因数（FOM）测定方案
 
 #### 概念与口径
-FOM（Figures of Merit，品质因数）评价**分析方法 / 校正模型**本身，走 Olivieri 净分析信号（NAS）多元口径，**不能**套用单变量 3σ/slope（会系统性低估 LOD）。
+FOM（Figures of Merit，品质因数）评价**分析方法 / 校正模型**本身，基于 Olivieri 净分析信号（NAS）多元框架，**不可**套用单变量 3σ/slope 口径（否则会系统性低估 LOD）。
 
 输出七项：`SEN`（灵敏度）、`γ`（分析灵敏度）、`s_x`（光谱噪声）、`s_0`（空白预测标准差）、`LOD`、`LOQ`、`SEL`（选择性）。
 
@@ -434,11 +434,11 @@ FOM（Figures of Merit，品质因数）评价**分析方法 / 校正模型**本
 
 #### 注意事项
 - `n_blank` 必须 **≥2**（≥10 推荐）；`n_blank=1` 时 `s_0` 静默退化为 0，`LOD=0` 失效。
-- 空白必须过预处理链且保留噪声；喂原始光谱或 `LOD/2` 替值 → 预测全相同 →
-  `SEN/LOD` 退化 `inf`（代码 `figures_of_merit.py` 第 99–103 行告警）。
+- 空白必须经过预处理链且保留噪声；输入原始光谱或 `LOD/2` 替值将使预测完全相同，
+  `SEN/LOD` 退化为 `inf`（代码 `figures_of_merit.py` 第 99–103 行给出告警）。
 - `SEN` **尺度相关**（受 y 标准化、校正集浓度范围影响），仅用于候选模型间横向比较，
   不是绝对物理灵敏度。
-- 跨天漂移别混进空白噪声（归 `drift.py`）。
+- 跨天漂移不应计入空白噪声（由 `drift.py` 处理）。
 
 #### 参考文献
 - Lorber, A.; Faber, N. M.; Kowalski, B. R. *Net analyte signal calculation in multivariate calibration.* **Anal. Chem.** 1997, 69(9), 1620–1626.（净分析信号 NAS 框架，FOM 的多元基础）
@@ -453,22 +453,22 @@ FOM（Figures of Merit，品质因数）评价**分析方法 / 校正模型**本
 ### 2. 光谱仪硬件评价
 
 #### 概念与口径
-硬件评价针对**光谱仪本身**，与"分析方法 FOM"是两个层面。UV 水质在线监测里要盯的硬件维度：
+硬件评价针对**光谱仪本身**，与"分析方法 FOM"属于不同层面。UV 水质在线监测中需关注的硬件维度：
 
 - **波长准确度 / 漂移**：峰位是否偏移（直接影响 PLS 建模与跨机复用）。
 - **光度 / 增益一致性**：逐波长增益、偏置是否稳定。
-- **信噪比（SNR）、暗噪声、基线稳定性**：决定你实测到的 `s_x`（方法噪声里含硬件噪声）。
-- **杂散光（stray light）**：抬高基线、压低吸光度上限。
+- **信噪比（SNR）、暗噪声、基线稳定性**：决定实测所得的 `s_x`（方法噪声中包含硬件噪声）。
+- **杂散光（stray light）**：抬升基线、降低吸光度上限。
 - **分辨率**：能否分辨相邻吸收峰。
 
 > 本节与下方「第 3 节 入库检验」的计算函数**不假设扫描机构**，对**光纤 / 阵列光谱仪（固定光栅、无机械光栅）同样适用**；其失效模式差异见第 3 节「适用说明：光纤 / 阵列光谱仪」。
 
 #### 本库当前实现：仪器间差异诊断
-本库不是做逐项入库检验，而是提供"两台机差在哪、该不该 / 怎么迁移"的**门控诊断**（`aimeta/transfer/diagnose.py`）：
+本库不直接执行逐项入库检验，而是提供跨仪器差异与迁移可行性的**门控诊断**（`aimeta/transfer/diagnose.py`）：
 
 - `estimate_wavelength_shift`：用平均光谱互相关估计 slave 相对 master 的波长偏移（nm）。
-- `estimate_gain_offset`：逐波长增益 / 偏置（master ≈ gain·slave + offset）；增益随波长变化明显 → 差异是"逐波长"的，PDS 比 DS 合适。
-- `residual_spectrum`：主从平均光谱之差，看差异是全局倾斜还是局部结构。
+- `estimate_gain_offset`：逐波长增益 / 偏置（master ≈ gain·slave + offset）；增益随波长变化显著，表明差异具有逐波长结构，此时 PDS 优于 DS。
+- `residual_spectrum`：主从平均光谱之差，用于判断差异属于全局倾斜还是局部结构。
 - `recommend_method`：根据偏移 / 样本数自动选 DS / PDS / SBC；偏移 > 0.5 nm 时先对齐波长轴。
 
 #### 仪器档案（规格与策略）
@@ -491,9 +491,9 @@ print(diag["method"], diag["shift_nm"], diag["reason"])
 ```
 
 #### 注意事项
-- 波长漂移 > 0.5 nm 必须先做波长轴对齐，否则 DS / PDS 在学一个错位映射。
+- 波长漂移 > 0.5 nm 时必须先进行波长轴对齐，否则 DS / PDS 将拟合一个错位的波长映射。
 - SNR、杂散光、分辨率等硬件指标**本库 `aimeta/hardware_eval.py` 可直接测算**（函数见第 3 节 `signal_to_noise` / `stray_light` / `resolution` 等），是否合格按仪器 datasheet / 检定规程（JJG 178、ASTM E275）的判据核验。
-- 本段（`transfer/diagnose`）只从实测光谱**诊断跨机差异**，并不替代逐项入库检验；要做逐项入库检验需另接标准物质与 测试流程（见第 3 节）。
+- 本段（`transfer/diagnose`）仅从实测光谱**诊断跨机差异**，不能替代逐项入库检验；执行逐项入库检验需另行准备标准物质与测试流程（见第 3 节）。
 
 #### 参考文献
 - 仪器间校准 / 迁移与差异诊断（DS / PDS / SBC / GLSW）：见 `aimeta/transfer/` 与 `docs/重构方案.md`。
@@ -505,7 +505,7 @@ print(diag["method"], diag["shift_nm"], diag["reason"])
 ### 3. 光谱仪硬件入库检验方案
 
 #### 概念与口径
-在把仪器搬去现场 / 复用模型之前，按紫外-可见分光光度计的计量检验口径做**逐项入库检验**。
+在仪器部署到现场或复用既有模型之前，按紫外-可见分光光度计的计量检验口径执行**逐项入库检验**。
 本库 `aimeta/hardware_eval.py` 提供从实测光谱**计算指标**的函数；标准物质 / 滤光片由使用方按检定规程准备。
 主要依据：**JJG 178《紫外、可见、近红外分光光度计》检定规程**、**ASTM E275** 系列。
 
@@ -545,19 +545,19 @@ print(res.report())     # metrics / pass_criteria / passed
 - 这些硬件指标是**方法 `s_x`（FOM 里的光谱噪声）的来源之一**：硬件噪声大，方法的 LOD / LOQ 必然差。
 
 #### 适用说明：光纤 / 阵列光谱仪（无机械光栅）
-本节方法对**光纤 / 阵列光谱仪（固定光栅、无机械扫描单色器，如 Ocean Optics / Avantes 类）同样适用**——
-本库所有硬件指标函数只吃"波长数组 + 光谱数组"，不假设扫描机构。差异主要在失效模式与检验频次：
+本节方法同样适用于**光纤 / 阵列光谱仪（固定光栅、无机械扫描单色器，如 Ocean Optics / Avantes 类）**——
+本库所有硬件指标函数仅依赖「波长数组 + 光谱数组」，不假定扫描机构。差异主要体现在失效模式与检验频次：
 
-| 项目 | 扫描式单色器 | 光纤 / 阵列光谱仪（你的情况） | 本节做法 |
+| 项目 | 扫描式单色器 | 光纤 / 阵列光谱仪 | 本节做法 |
 |---|---|---|---|
 | 波长漂移主因 | 丝杠 / 齿轮机械回差 | **温度驱动**的像元↔波长标定漂移（可达数 nm） | 做**周期性波长重标定**（Hg-Ar / Ne 灯或钬 / 镨钕标准片）；在线监测更关键（`drift.py`） |
-| 分辨率 | 靠狭缝 / 步长调 | **固定**（狭缝 + 光栅 + 像元），不可调 | 用汞 / 氩灯线 FWHM 核验收货指标；别指望"开狭缝提 SNR" |
+| 分辨率 | 靠狭缝 / 步长调 | **固定**（狭缝 + 光栅 + 像元），不可调 | 用汞 / 氩灯线 FWHM 核验收货指标；无法通过增大狭缝提高 SNR |
 | SNR | 取决于扫描次数 | 取决于**积分时间 + 信号平均** | 必须在**实际运行的积分时间 / 平均次数下**测 SNR / 暗噪声 |
-| 杂散光 | 双单色器压得低 | 光纤耦合 + 无双单色器，**往往更高** | 照测且**更要做**（NaI / 截止滤光片） |
+| 杂散光 | 双单色器可有效抑制 | 光纤耦合且无双单色器，**通常更高** | 仍需测量，且应更为重视（NaI / 截止滤光片） |
 | 暗 / 读出噪声 | 光电管暗电流 | CCD / CMOS 暗电流、读出噪声（制冷与否差别大） | `dark_noise`（关快门）直接测 |
 | JJG 178 扫描条款 | 适用 | 不适用（无扫描机构） | 其余（波长 / 光度 / 杂散光 / 基线 / 噪声 / 分辨率）计算口径**完全一致** |
 
-一句话：**计算口径照搬，重心从"机械扫描机构"挪到"温度漂移标定 + 积分时间下的 SNR + 杂散光"**。
+对阵列光谱仪，计算口径与扫描式单色器一致（JJG 178 相应条款照搬即可），重心是温度漂移标定、积分时间下的 SNR 与杂散光。
 
 #### 参考文献
 - **JJG 178《紫外、可见、近红外分光光度计》检定规程**（国内计量溯源，含波长 / 光度 / 杂散光 / 基线 / 噪声 / 分辨率检验）。
@@ -568,7 +568,7 @@ print(res.report())     # metrics / pass_criteria / passed
 
 ## 部署到工控机
 
-`edge/` 是独立的极简运行时，部署端依赖与 aimeta 一致（numpy / scipy / PyWavelets）；纯 numpy 可编译算子构成的链仍可脱离 scipy/pywt 单独运行。
+`edge/` 是独立的精简运行时，部署端依赖与 aimeta 一致（numpy / scipy / PyWavelets）；纯 numpy 可编译算子构成的链仍可脱离 scipy/pywt 单独运行。
 仅支持线性模型（PLS / Ridge / Lasso / OLS / PCR）与可编译算子。
 
 ```python
@@ -600,12 +600,12 @@ JSON 结果，支持 `--variant pca`（默认）与 `range`（原 Linux 流水�
 故**线性、随机森林、LightGBM、AdaBoost 等任意 sklearn 系模型都能直接加载预测**，不要求「仅线性模型」。
 
 工控机只需 Python 3.12 + 随脚本附带的 `requirements.txt`（joblib / numpy / scipy / scikit-learn /
-pywavelets），用 `pip install -r requirements.txt` 安装即可，无需安装 aimeta 全套。
+pywavelets），用 `pip install -r requirements.txt` 安装即可，无需安装 aimeta 完整依赖树。
 
 简要流程：
 
-1. 拷 `.pkl` 模型到 `<部署目录>\data\models\`（第二套模型放 `models\wider_range\`）；
-2. 拷 `river_inference.py` 与 `requirements.txt` 到 `<部署目录>\`；
+1. 复制 `.pkl` 模型到 `<部署目录>\data\models\`（第二套模型置于 `models\wider_range\`）；
+2. 复制 `river_inference.py` 与 `requirements.txt` 到 `<部署目录>\`；
 3. `conda create -n reg_venv python=3.12 && conda activate reg_venv && pip install -r requirements.txt`；
 4. 在站点 `strategy_ai???.ini` 的 `[Python]` 段设 `reg_exe = ...\reg_venv\python.exe`；
 5. 测试：`python river_inference.py -file_name SpectrumData_****.arff -re_train False`，
@@ -633,7 +633,7 @@ python -m pytest -q
 ## 注意事项
 
 - **部署端依赖与 aimeta 一致（numpy / scipy / PyWavelets）**。
-  纯 numpy 可编译算子（``savgol`` / ``snv`` / ``msc`` / 缩放）仍走零依赖快路径；
+  纯 numpy 可编译算子（``savgol`` / ``snv`` / ``msc`` / 缩放）仍沿零依赖快速路径执行；
   ``wavelet`` 等需外部库的算子会委托注册算子执行，工控机需装好对应依赖
   （aimeta 主依赖已含 scipy / PyWavelets，``pip install aimeta`` 即满足）。
 - **`snv` 是逐条光谱标准化**；若需要对整个矩阵做列标准化，请用 `column_scale`。
@@ -643,7 +643,7 @@ python -m pytest -q
   `SlopeBiasCorrection` 做响应校正。
 - **`ModelCard` 会校验波长轴**：推理时**波长数量**（`X` 的列数）与卡内记录不等会直接报错；
   若调用 `predict` 时还传入了 `wavelengths`（或用带波长轴的 `SpectrumSet`），则进一步比对
-  **具体波长值**是否落在训练网格上（`np.allclose`）。只喂 `X` 不传波长时仅验数量，
+  **具体波长值**是否落在训练网格上（`np.allclose`）。仅传入 `X` 而不传波长时仅校验数量，
   波长网格被重采样/错位不会被发现——生产部署建议始终传入波长轴。
-- **算指标时，空白样本必须先过预处理链**。若直接喂原始光谱，
-  预测值可能落在检出限以下被替为 LOD/2，导致灵敏度与 LOD 退化为 `inf`（此时会给出告警）。
+- **计算指标时，空白样本必须先经过预处理链**。若直接输入原始光谱，
+  预测值可能落在检出限以下并被替换为 LOD/2，导致灵敏度与 LOD 退化为 `inf`（此时会给出告警）。
