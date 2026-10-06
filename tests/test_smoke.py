@@ -86,15 +86,36 @@ def test_edge_chain_from_config_compiles():
     assert ops and all("kind" in o for o in ops)
 
 
-def test_guard_clips_to_range(data):
+def test_guard_bounds_and_flags(data):
     wl, X, y = data
     params = load_params()
     card = train_model(SpectrumSet(X=X, wavelengths=wl, y=y), "AN", "pls",
                        chain=[{"op": "snv"}], model_params={"n_components": 4},
                        param_def=params["AN"])
     out = predict_with_guard(card, X, param_def=params["AN"])
-    assert out["prediction"].min() >= params["AN"].lower_bound
-    assert out["prediction"].max() <= params["AN"].upper_bound
+    lo, hi = params["AN"].lower_bound, params["AN"].upper_bound
+    # 低于检出限替为 LOD/2，不会低于 LOD/2；高于上限夹到上限
+    assert out["prediction"].min() >= lo / 2.0 - 1e-12
+    assert out["prediction"].max() <= hi + 1e-12
+    assert "below_lod" in out and "above_upper" in out
+    assert out["below_lod"].dtype == bool and out["above_upper"].dtype == bool
+
+
+def test_apply_bounds_substitutes_lod_half():
+    from aimeta.metrics.water_standards import apply_bounds
+    pred = np.array([-1.0, 0.0, 0.03, 2.0, 100.0])
+    lo, hi = 0.025, 3.0
+    out, below, above = apply_bounds(pred, lo, hi)
+    # 低于检出限 -> LOD/2
+    assert out[0] == lo / 2.0 and out[1] == lo / 2.0
+    assert below[0] and below[1] and not below[2]
+    # 高于上限 -> 夹到上限
+    assert out[-1] == hi and above[-1]
+    # 中间值不变
+    assert out[2] == 0.03 and out[3] == 2.0
+    # 无边界时不处理
+    out2, b2, a2 = apply_bounds(pred, None, None)
+    assert np.array_equal(out2, pred) and not b2.any() and not a2.any()
 
 
 def test_mspc_flags_contaminated_probe(data):

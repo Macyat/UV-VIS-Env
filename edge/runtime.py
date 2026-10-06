@@ -166,8 +166,10 @@ class LinearEdgeModel:
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         y = self.transform(X) @ self.coef + self.intercept
+        y = np.asarray(y, dtype=np.float64).ravel()
         if self.lower_bound is not None:
-            y = np.maximum(y, self.lower_bound)
+            below = y < self.lower_bound
+            y = np.where(below, self.lower_bound / 2.0, y)   # 未检出替为 LOD/2
         if self.upper_bound is not None:
             y = np.minimum(y, self.upper_bound)
         return y

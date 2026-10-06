@@ -42,6 +42,29 @@ def classify(values: np.ndarray, param: WaterParam) -> np.ndarray:
     return np.searchsorted(np.asarray(param.ranges, dtype=np.float64), v, side="right")
 
 
+def apply_bounds(pred: np.ndarray, lo: Optional[float], hi: Optional[float]):
+    """按检出限 / 量程上限处理预测值，并返回标记。
+
+    规则：
+        - 低于检出限 (lo)：替换为 ``lo / 2`` 作为替代值（避免把未检出
+          一律报成检出限值本身而系统性高估），并打 ``below`` 标
+        - 高于量程上限 (hi)：夹到 ``hi``，并打 ``above`` 标
+        - lo / hi 为 None 时该项不处理
+
+    Returns:
+        (pred_out, below_mask, above_mask)
+    """
+    pred = np.asarray(pred, dtype=np.float64).ravel()
+    below = (pred < lo) if lo is not None else np.zeros(pred.shape, dtype=bool)
+    above = (pred > hi) if hi is not None else np.zeros(pred.shape, dtype=bool)
+    out = pred.copy()
+    if lo is not None:
+        out = np.where(below, lo / 2.0, out)
+    if hi is not None:
+        out = np.minimum(out, hi)
+    return out, below, above
+
+
 def misclassification_matrix(y_true: np.ndarray, y_pred: np.ndarray,
                              param: WaterParam) -> np.ndarray:
     """类别混淆矩阵：行 = 真值类别，列 = 预测类别。"""

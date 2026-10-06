@@ -2,7 +2,7 @@
 
 三道保护：
     1. 指纹校验 —— 链/波长轴对不上就直接拒绝，杜绝「训的和跑的不是一条链」
-    2. 检出限 / 量程上下限截断
+    2. 检出限 / 量程上限处理（低于检出限替为 LOD/2，高于上限夹到上限）
     3. 可选：先过 MSPC 判异常，异常样本给出标记而不是硬出一个数
 """
 from __future__ import annotations
@@ -13,6 +13,7 @@ import numpy as np
 
 from ..core.artifact import ModelCard
 from ..core.spectra import SpectrumSet
+from ..metrics.water_standards import apply_bounds
 from ..preprocessing.base import Pipeline
 
 
@@ -59,11 +60,21 @@ def predict_with_guard(
     param_def: Optional[Any] = None,
     **kw,
 ) -> Dict[str, np.ndarray]:
-    """预测 + 上下限保护，并返回被截断的标记。"""
-    pred = predict(card, X, **kw)
-    clipped = np.zeros_like(pred, dtype=bool)
+    """预测 + 检出限 / 量程上限处理，并返回标记。
+
+    返回：
+        prediction: 处理后的预测值（低于检出限替为 LOD/2，高于上限夹到上限）
+        below_lod:  布尔数组，True 表示该样本低于检出限
+        above_upper: 布尔数组，True 表示该样本高于量程上限
+    """
+    # 用 raw 预测算标记，避免被模型内部的边界处理掩盖
+    raw = np.asarray(card.estimator.predict_raw(
+        Pipeline.from_config(card.preproc_chain).transform(
+            np.asarray(X, dtype=np.float64))), dtype=np.float64).ravel()
     if param_def is not None:
-        lo, hi = param_def.lower_bound, param_def.upper_bound
-        clipped |= (pred < lo) | (pred > hi)
-        pred = np.clip(pred, lo, hi)
-    return {"prediction": pred, "clipped": clipped}
+        pred, below, above = apply_bounds(raw, param_def.lower_bound,
+                                          param_def.upper_bound)
+    else:
+        pred, below, above = raw, np.zeros(raw.shape, dtype=bool), \
+            np.zeros(raw.shape, dtype=bool)
+    return {"prediction": pred, "below_lod": below, "above_upper": above}

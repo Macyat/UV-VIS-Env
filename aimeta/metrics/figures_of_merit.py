@@ -97,7 +97,7 @@ def figures_of_merit(
     if len(preds) > 1 and np.allclose(preds, preds[0]):
         warnings.warn(
             "空白样本的预测值全部相同，回归向量将被估计为 0（SEN/LOD 退化）。"
-            "常见原因：X_blank 未经预处理，或预测值被上下限截断。"
+            "常见原因：X_blank 未经预处理，或预测值落在检出限以下被替为 LOD/2。"
         )
     s_0 = float(np.std(preds, ddof=1)) if len(preds) > 1 else float(np.std(preds))
 

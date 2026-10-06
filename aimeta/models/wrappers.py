@@ -1,4 +1,4 @@
-"""WaterQualityModel：x/y 缩放 + 上下限截断的包装器。
+"""WaterQualityModel：x/y 缩放 + 检出限/量程上限处理的包装器。
 
 统一训练与推理时的缩放方式，并支持导出为 numpy-only 的部署产物
 （见 ``edge/runtime.py``）。
@@ -9,9 +9,13 @@ from typing import Optional
 
 import numpy as np
 
+from ..metrics.water_standards import apply_bounds
+
 
 class WaterQualityModel:
-    """包装任意估计器：X 中心化 → 估计器 → y 反标准化 → 上下限截断。
+    """包装任意估计器：X 中心化 → 估计器 → y 反标准化 → 检出限/量程上限处理。
+
+    低于检出限的预测值替换为 lower_bound / 2，高于量程上限的夹到 upper_bound。
 
     Args:
         estimator: 任何实现了 fit/predict 的对象
@@ -38,15 +42,16 @@ class WaterQualityModel:
         self.estimator.fit(X - self.x_mean_, (y - self.y_mean_) / self.y_scale_)
         return self
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def predict_raw(self, X: np.ndarray) -> np.ndarray:
+        """未经检出限 / 量程上限处理的中间预测值。"""
         X = np.asarray(X, dtype=np.float64)
         pred = self.estimator.predict(X - self.x_mean_) * self.y_scale_ + self.y_mean_
-        pred = np.asarray(pred, dtype=np.float64).ravel()
-        if self.lower_bound is not None:
-            pred = np.maximum(pred, self.lower_bound)
-        if self.upper_bound is not None:
-            pred = np.minimum(pred, self.upper_bound)
-        return pred
+        return np.asarray(pred, dtype=np.float64).ravel()
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        pred = self.predict_raw(X)
+        out, _, _ = apply_bounds(pred, self.lower_bound, self.upper_bound)
+        return out
 
     # ---- 供 edge 导出 ----
     def linear_coef(self) -> Optional[np.ndarray]:
