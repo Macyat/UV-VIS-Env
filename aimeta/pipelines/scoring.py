@@ -4,13 +4,15 @@
 按每个指标分别排名、求和得到 ``rank``（越小越优），并写出 CSV，供用户挑选
 TOP K 与最终模型（结合各模型自己的图）。
 
-排名规则与 ``Train.py`` 完全一致：
+排名规则（在 ``Train.py`` 基础上增加 R² 杠杆）：
   - 越大越好（倒序）：alarm_acc / r2_score / daily_r2_score /
     daily_pearson_r_score / rate of reaching the standard
   - 越小越好（正序）：alarm_err / mape / rmse / bad grouped ratio /
     |durbin_watson − 2|
   - mape / rmse / rate / bad grouped / durbin 用「竞赛排名」（并列取最小序）；
     其余用 argsort 序位排名。最终 ``rank`` = 十个分量排名之和。
+  - R² 杠杆：``r2_score`` / ``daily_r2_score`` 为负时按其幅度放大惩罚
+    （见 ``_r2_leveraged_ranks``），避免 R²=-10 与 R²=-0.1 只差一档。
 """
 from __future__ import annotations
 
@@ -23,13 +25,13 @@ import numpy as np
 
 # (指标键, 方向, 排名方法)
 #   direction: desc=越大越好, asc=越小越好, asc_abs2=|x-2| 越小越好
-#   method:    ordinal=序位排名, competition=并列取最小序
+#   method:    ordinal=序位排名, competition=并列取最小序, r2=序位+负R²杠杆
 RANK_COMPONENTS: List[Tuple[str, str, str]] = [
     ("alarm_acc", "desc", "ordinal"),
     ("alarm_err", "asc", "ordinal"),
     ("mape", "asc", "competition"),
-    ("r2_score", "desc", "ordinal"),
-    ("daily_r2_score", "desc", "ordinal"),
+    ("r2_score", "desc", "r2"),
+    ("daily_r2_score", "desc", "r2"),
     ("daily_pearson_r_score", "desc", "ordinal"),
     ("rmse", "asc", "competition"),
     ("rate of reaching the standard", "desc", "competition"),
@@ -64,8 +66,32 @@ def _competition_ranks(values: Sequence[float], descending: bool) -> np.ndarray:
     return np.array([sorted_vals.index(v) for v in arr], dtype=float)
 
 
+# 负 R² 杠杆系数：惩罚 = R2_LEVERAGE * (n-1) * |R²| / (1 + |R²|)。
+# 默认 1.0（极端负 R² 最多多扣 n-1 个序位，即该分量直接垫底）；调大则对负 R² 更严厉。
+R2_LEVERAGE: float = 1.0
+
+
+def _r2_leveraged_ranks(values: Sequence[float]) -> np.ndarray:
+    """R² 杠杆排名：序位基础上，负 R² 按其幅度放大惩罚。
+
+    负 R² 表示模型劣于「用均值预测」的基线，幅度越负越应重罚；纯序位会把
+    R²=-10 与 R²=-0.1 只差一档，掩盖质的差异。惩罚 = R2_LEVERAGE * (n-1) * |R²| / (1 + |R²|)，
+    随 |R²| 增大饱和于 R2_LEVERAGE * (n-1)（等价于该分量直接垫底），避免单个极端负 R² 无限放大。
+    """
+    arr = np.asarray(values, dtype=float)
+    n = len(arr)
+    order = np.argsort(arr)[::-1]
+    ranks = np.empty(n, dtype=float)
+    ranks[order] = np.arange(n)
+    neg = arr < 0
+    ranks[neg] += R2_LEVERAGE * (n - 1) * (-arr[neg]) / (1.0 - arr[neg])
+    return ranks
+
+
 def _component_rank(values: Sequence[float], direction: str,
                     method: str) -> np.ndarray:
+    if method == "r2":
+        return _r2_leveraged_ranks(values)
     if direction == "asc_abs2":
         key = np.abs(np.asarray([float(v) for v in values], dtype=float) - 2.0)
         return _competition_ranks(key, descending=False) if method == "competition" \

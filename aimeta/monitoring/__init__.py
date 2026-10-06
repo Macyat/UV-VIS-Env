@@ -8,7 +8,7 @@
 from .control_charts import (
     shewhart_limits, cusum, ewma, arl0, effective_sample_size,
 )
-from .mspc import MSPC
+from .mspc import MSPC, flag_outliers
 
 __all__ = ["shewhart_limits", "cusum", "ewma", "arl0",
-           "effective_sample_size", "MSPC"]
+           "effective_sample_size", "MSPC", "flag_outliers"]

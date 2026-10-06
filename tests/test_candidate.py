@@ -61,6 +61,22 @@ def test_sweep_grid_enumerates_chains_times_models(synth):
     assert len(fps) == 6  # 每张卡指纹唯一
 
 
+def test_cv_day_based_no_future_leakage():
+    # 按日 CV：expanding / rolling 只能用过去的天，绝不拿未来预测过去
+    from aimeta.pipelines.train import _cv_splits
+    day_idx = np.array([0, 0, 1, 1, 2, 2, 3, 3])  # 4 天，每天 2 样本
+
+    for tr, te in _cv_splits(8, day_idx, "expanding", folds=5):
+        assert (day_idx[tr] < day_idx[te][0]).all()
+
+    for tr, te in _cv_splits(8, day_idx, "rolling", folds=5, window=1):
+        assert (day_idx[tr] < day_idx[te][0]).all()
+        assert set(day_idx[tr]) == {day_idx[te][0] - 1}
+
+    for tr, te in _cv_splits(8, day_idx, "logo", folds=5):
+        assert (day_idx[tr] != day_idx[te][0]).all()
+
+
 def test_build_score_row_has_full_set(synth):
     wl, X, y, day_idx, param = synth
     card = train_model(SpectrumSet(X=X, wavelengths=wl, y=y), "TEST", "pls",

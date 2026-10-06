@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from sklearn.model_selection import KFold
@@ -20,11 +20,56 @@ from ..models.wrappers import WaterQualityModel
 from ..metrics.water_standards import WaterParam
 
 
+def _cv_splits(n: int, day_idx: Optional[np.ndarray], cv: str, folds: int,
+               seed: int = 0, window: Optional[int] = None
+               ) -> List[Tuple[np.ndarray, np.ndarray]]:
+    """按 ``cv`` 策略生成 (train, test) 索引对。
+
+    - ``kfold``：随机打乱 K 折（无需 day_idx）。
+    - ``logo``：按日留一（训练集 = 除该天外的所有天；含未来天，存在时序泄漏，仅作对照）。
+    - ``expanding``：按日扩窗（训练集 = 该天之前的所有天，不用未来预测过去）。
+    - ``rolling``：按日滚动窗（训练集 = 该天之前最近的 ``window`` 天，不用未来预测过去）。
+
+    ``logo`` / ``expanding`` / ``rolling`` 需要 ``day_idx``（每样本所属的「第几天」标签）。
+    """
+    if n < 2:
+        return []
+    idx = np.arange(n)
+    if cv == "kfold":
+        kf = KFold(n_splits=min(folds, n), shuffle=True, random_state=seed)
+        return [(idx[tr], idx[te]) for tr, te in kf.split(idx)]
+    if day_idx is None:
+        raise ValueError(f"cv={cv!r} 是按日交叉验证，需要提供 day_idx")
+    days = np.asarray(day_idx).ravel()
+    if len(days) != n:
+        raise ValueError("day_idx 长度必须等于样本数")
+    unique = np.unique(days)
+    splits: List[Tuple[np.ndarray, np.ndarray]] = []
+    for d in unique:
+        test = np.where(days == d)[0]
+        if cv == "logo":
+            train = np.where(days != d)[0]
+        elif cv == "expanding":
+            train = np.where(days < d)[0]
+        elif cv == "rolling":
+            if window is None:
+                raise ValueError("cv='rolling' 需要给定 cv_window（滚动窗口的天数）")
+            past = unique[unique < d]
+            win = past[-window:]
+            train = np.where(np.isin(days, win))[0]
+        else:
+            raise ValueError(f"unknown cv: {cv!r}")
+        if len(train) and len(test):
+            splits.append((train, test))
+    return splits
+
+
 def _cv_rmse(X: np.ndarray, y: np.ndarray, model_key: str, params: Dict[str, Any],
-             folds: int = 5, seed: int = 0) -> float:
-    kf = KFold(n_splits=min(folds, len(y)), shuffle=True, random_state=seed)
+             day_idx: Optional[np.ndarray] = None, cv: str = "kfold",
+             folds: int = 5, seed: int = 0,
+             cv_window: Optional[int] = None) -> float:
     errs = []
-    for tr, te in kf.split(X):
+    for tr, te in _cv_splits(len(y), day_idx, cv, folds, seed, cv_window):
         m = WaterQualityModel(build_model(model_key, **params))
         m.fit(X[tr], y[tr])
         errs.append(float(np.sqrt(np.mean((y[te] - m.predict(X[te])) ** 2))))
@@ -35,21 +80,26 @@ def select_n_components(
     X: np.ndarray, y: np.ndarray, *, model_key: str = "pls",
     max_components: int = 20, folds: int = 5,
     model_params: Optional[Dict[str, Any]] = None,
+    day_idx: Optional[np.ndarray] = None,
+    cv: str = "kfold", cv_window: Optional[int] = None,
 ) -> int:
-    """按 PLS_toolbox routine为潜变量模型选择维数 n_components。
+    """按 PLS_toolbox routine 为潜变量模型选择维数 n_components。
 
-    对 n_components = 1..k 逐一做 K 折交叉验证（取 RMSE），返回误差最小者。
-    k = min(max_components, n_samples // folds, n_features)，保证每个 CV 折的
+    对 n_components = 1..k 逐一做交叉验证（取 RMSE），返回误差最小者。
+    按日 CV（logo/expanding/rolling）时以天数计折，否则用 ``folds``。
+    k = min(max_components, n_samples // n_folds, n_features)，保证每个 CV 折的
     训练集都放得下该维数。仅对 latent 族（pls / pcr）有意义。
     """
     if model_meta(model_key).get("family") != "latent":
         raise ValueError(f"select_n_components 仅适用于 latent 族模型，收到 {model_key!r}")
     n, p = X.shape
-    k = min(max_components, max(1, n // folds), p)
+    n_folds = len(np.unique(np.asarray(day_idx))) if day_idx is not None else folds
+    k = min(max_components, max(1, n // max(1, n_folds)), p)
     base = dict(model_params or {})
     errs: List[float] = []
     for nc in range(1, k + 1):
-        errs.append(_cv_rmse(X, y, model_key, {**base, "n_components": nc}, folds=folds))
+        errs.append(_cv_rmse(X, y, model_key, {**base, "n_components": nc},
+                             day_idx=day_idx, cv=cv, folds=folds, cv_window=cv_window))
     return int(np.nanargmin(errs)) + 1
 
 
@@ -63,6 +113,9 @@ def train_model(
     folds: int = 5,
     instrument_id: str = "unknown",
     calibration_upper: Optional[float] = None,
+    day_idx: Optional[np.ndarray] = None,
+    cv: str = "kfold",
+    cv_window: Optional[int] = None,
 ) -> ModelCard:
     """训练单个「参数 × 模型」，返回 ModelCard。
 
@@ -73,7 +126,12 @@ def train_model(
         chain:   预处理链（YAML 字典列表）
         model_params: 模型超参
         param_def: 该参数的计量定义（决定预测上下限）
-        folds:   CV 折数
+        folds:   CV 折数（kfold 用）
+        day_idx: 每样本所属的「第几天」标签；按日 CV（logo/expanding/rolling）时必填
+        cv:      CV 策略：'kfold'（随机打乱）/ 'logo'（按日留一，含未来、仅对照）/
+                 'expanding'（按日扩窗）/ 'rolling'（按日滚动窗）。
+                 expanding / rolling 只用过去的天，不用未来预测过去
+        cv_window: 滚动窗口天数（仅 cv='rolling' 时需要）
         calibration_upper: 该校准标样的最高浓度（由专门的标样初始化流程给出）。
             给出时设备死限 = 2 × calibration_upper；不给出则设备死限不启用，
             仅用河流死限（param_def 的河流死限或默认 2 × V类）。注意：现场
@@ -103,7 +161,8 @@ def train_model(
     # 误差最小的维数（PLS_toolbox routine）。显式给了就以手填为准。
     if model_meta(model_key).get("family") == "latent" and "n_components" not in params:
         params["n_components"] = select_n_components(
-            X, y, model_key=model_key, folds=folds)
+            X, y, model_key=model_key, folds=folds, day_idx=day_idx,
+            cv=cv, cv_window=cv_window)
 
     wrapped = WaterQualityModel(
         build_model(model_key, **params),
@@ -113,7 +172,8 @@ def train_model(
     )
     wrapped.fit(X, y)
 
-    rmse_cv = _cv_rmse(X, y, model_key, params, folds=folds)
+    rmse_cv = _cv_rmse(X, y, model_key, params, day_idx=day_idx, cv=cv,
+                       folds=folds, cv_window=cv_window)
     return ModelCard(
         model_key=model_key,
         label=label,
@@ -139,6 +199,9 @@ def sweep(
     param_def: Optional[WaterParam] = None,
     folds: int = 5,
     instrument_id: str = "unknown",
+    day_idx: Optional[np.ndarray] = None,
+    cv: str = "kfold",
+    cv_window: Optional[int] = None,
 ) -> List[ModelCard]:
     """模型 sweep：取代老 run.py 的 subprocess fork。
 
@@ -147,7 +210,8 @@ def sweep(
     model_params = model_params or {}
     cards = [
         train_model(spectra, label, k, chain, model_params.get(k), param_def,
-                    folds, instrument_id)
+                    folds=folds, instrument_id=instrument_id, day_idx=day_idx,
+                    cv=cv, cv_window=cv_window)
         for k in model_keys
     ]
     return sorted(cards, key=lambda c: c.fom.get("rmse_cv", np.inf))
@@ -162,6 +226,9 @@ def sweep_grid(
     param_def: Optional[WaterParam] = None,
     folds: int = 5,
     instrument_id: str = "unknown",
+    day_idx: Optional[np.ndarray] = None,
+    cv: str = "kfold",
+    cv_window: Optional[int] = None,
 ) -> List[ModelCard]:
     """候选池：跨「预处理链 × 模型」全量枚举（取代手填单链 sweep）。
 
@@ -178,5 +245,6 @@ def sweep_grid(
         for k in model_keys:
             cards.append(train_model(
                 spectra, label, k, chain, model_params.get(k),
-                param_def, folds, instrument_id))
+                param_def, folds=folds, instrument_id=instrument_id,
+                day_idx=day_idx, cv=cv, cv_window=cv_window))
     return cards

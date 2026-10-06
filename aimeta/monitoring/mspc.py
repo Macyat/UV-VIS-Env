@@ -86,3 +86,58 @@ class MSPC:
         r["spe_limit"] = self.spe_limit_
         r["contribution"] = r["residual"] ** 2
         return r
+
+
+def flag_outliers(
+    X: np.ndarray,
+    n_components: int = 5,
+    alpha: float = 0.05,
+    by: str = "spe",
+) -> Dict[str, object]:
+    """标记候选异常样本，供人工复核（**不自动删除**）。
+
+    拟合 :class:`MSPC` 后，按判据（T² / SPE 相对各自控制限的超限比）降序排列，
+    返回每个样本的下标、统计量、是否超限与贡献。删除与否由人决定。
+
+    推荐的人工在环流程（每轮）：
+        标记 → 看贡献图 / 数值 → 人工决定删除哪些下标 → 重跑，直到满意。
+
+    Args:
+        X: (n, p) 训练光谱。
+        n_components: PCA 主成分数。
+        alpha: 控制限置信水平（越小越保守、标记越少）。
+        by: 排序判据：``'spe'``（Q 残差，默认）/ ``'t2'``（Hotelling）/ ``'any'``。
+
+    Returns:
+        dict：``idx``（按判据从最差到最好的样本下标）、``T2`` / ``SPE``（对应统计量）、
+        ``t2_alarm`` / ``spe_alarm``（是否超限）、``ratio``（超限比）、
+        ``contribution``（各波长对 SPE 的贡献，用于人工看异常来源）、``model``。
+    """
+    X = np.asarray(X, dtype=np.float64)
+    model = MSPC(n_components=n_components, alpha=alpha).fit(X)
+    r = model.transform(X)
+    t2_ratio = (r["T2"] / model.t2_limit_
+                if np.isfinite(model.t2_limit_)
+                else np.zeros(len(X)))
+    spe_ratio = (r["SPE"] / model.spe_limit_
+                 if model.spe_limit_ > 0
+                 else np.zeros(len(X)))
+    if by == "spe":
+        ratio = spe_ratio
+    elif by == "t2":
+        ratio = t2_ratio
+    elif by == "any":
+        ratio = np.maximum(t2_ratio, spe_ratio)
+    else:
+        raise ValueError(f"unknown by: {by!r}")
+    order = np.argsort(ratio)[::-1]
+    return {
+        "model": model,
+        "idx": order,
+        "T2": r["T2"][order],
+        "SPE": r["SPE"][order],
+        "t2_alarm": (r["T2"] > model.t2_limit_)[order],
+        "spe_alarm": (r["SPE"] > model.spe_limit_)[order],
+        "ratio": ratio[order],
+        "contribution": r["residual"] ** 2,
+    }
