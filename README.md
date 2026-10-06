@@ -483,8 +483,8 @@ print(diag["method"], diag["shift_nm"], diag["reason"])
 
 #### 注意事项
 - 波长漂移 > 0.5 nm 必须先做波长轴对齐，否则 DS / PDS 在学一个错位映射。
-- SNR、杂散光、分辨率等**出厂规格**请对照仪器 datasheet / 检定规程核验；本库不直接测这些，
-  只从实测光谱**诊断跨机差异**。要做逐项入库检验需另接标准物质与测试流程。
+- SNR、杂散光、分辨率等硬件指标**本库 `aimeta/hardware_eval.py` 可直接测算**（函数见第 3 节 `signal_to_noise` / `stray_light` / `resolution` 等），是否合格按仪器 datasheet / 检定规程（JJG 178、ASTM E275）的判据核验。
+- 本段（`transfer/diagnose`）只从实测光谱**诊断跨机差异**，并不替代逐项入库检验；要做逐项入库检验需另接标准物质与 测试流程（见第 3 节）。
 
 #### 参考文献
 - 仪器间校准 / 迁移与差异诊断（DS / PDS / SBC / GLSW）：见 `aimeta/transfer/` 与 `docs/重构方案.md`。
