@@ -149,6 +149,51 @@ spectra.clip_wavelengths(220, 700)      # 截取波段
 spectra.sort_by("timestamp")            # 按时间排序
 ```
 
+### 数据清洗（异常样本剔除）
+
+异常样本会抬高控制限、污染建模。`MSPC` 用潜变量把整条光谱压成两个互补的统计量，
+用于标记异常样本：
+
+| 统计量 | 含义 | 报警含义 |
+|---|---|---|
+| T²（Hotelling） | 模型内部变异：样本在正常波动方向上偏离多远 | 沿正常方向偏离过大（如浓度极端） |
+| SPE（Q 残差） | 模型解释不了的新变异 | 出现模型未见过的新结构（探头污染、气泡、异物） |
+
+控制限取 `alpha` 分位（T² 用 F 分布，SPE 用 Jackson–Mudholkar 卡方近似）。联合判读：
+
+- T² 正常、SPE 正常 → 受控；
+- T² 正常、SPE 高 → 出现模型未见过的新结构（污染 / 异物）；
+- T² 高、SPE 正常 → 沿正常方向但偏离极端（如超高浓度）；
+- T² 高、SPE 高 → 严重异常。
+
+清洗采用**人工在环**流程——工具只负责标记候选，删除由人拍板：
+
+```python
+from aimeta.monitoring import flag_outliers
+
+res = flag_outliers(X, n_components=5, alpha=0.05, by="spe")
+res["idx"]          # 候选样本下标，按「最可疑」从高到低排
+res["SPE"]          # 对应 Q 残差
+res["spe_alarm"]    # 是否超过 SPE 控制限
+res["contribution"] # 各波长对 SPE 的贡献，用于人工看异常来源
+```
+
+人工逐一看最可疑的几个，结合 `contribution` 贡献图判断异常是否来自真实的
+污染 / 异物（而非正常波动），再决定删除哪些：
+
+```python
+from aimeta.viz import plots
+plots.plot_contribution(wl, res["contribution"][res["idx"][0]])   # 最可疑样本的 SPE 贡献图
+
+drop = [res["idx"][0], res["idx"][2]]   # 人工决定要删的下标
+X = np.delete(X, drop, axis=0)
+# 删完重跑 flag_outliers，看是否还有要删的，直到满意
+```
+
+每一轮「标记 → 人工删 → 重跑」都由人控制，避免自动删除误伤正常样本。
+
+交互式演示（T² vs SPE 散点 + 选删 + 重算重画）见 [`notebooks/mspc_outlier_clean.ipynb`](notebooks/mspc_outlier_clean.ipynb)。
+
 ### 预处理链
 
 预处理链以配置描述，可序列化回配置，训练与部署共用同一份定义。
@@ -292,21 +337,7 @@ print(rep["rmse"], rep["acceptance_rate"], rep["daily_r2"])
 
 ### 在线监控
 
-#### 异常值筛选：T²（Hotelling）与 SPE（Q 残差）
-
-`MSPC` 用潜变量把整条光谱压成两个互补的统计量，二者各自设控制限、联合判断样本是否异常：
-
-| 统计量 | 含义 | 报警含义 |
-|---|---|---|
-| T²（Hotelling） | 模型内部变异：样本在正常波动方向上偏离多远 | 沿正常方向偏离过大（如浓度极端） |
-| SPE（Q 残差） | 模型解释不了的新变异 | 出现模型未见过的新结构（探头污染、气泡、异物） |
-
-控制限取 `alpha` 分位（T² 用 F 分布，SPE 用 Jackson–Mudholkar 卡方近似）。联合判读：
-
-- T² 正常、SPE 正常 → 受控；
-- T² 正常、SPE 高 → 出现模型未见过的新结构（污染 / 异物）；
-- T² 高、SPE 正常 → 沿正常方向但偏离极端（如超高浓度）；
-- T² 高、SPE 高 → 严重异常。
+在线阶段用正常时期的光谱建参考模型，对**新到样本**做 T²/SPE 监控：
 
 ```python
 from aimeta.monitoring import MSPC
@@ -314,51 +345,12 @@ from aimeta.monitoring import MSPC
 m = MSPC(n_components=5, alpha=0.05).fit(X_normal)   # 用正常时期的光谱建模
 r = m.monitor(X_new)
 
-r["T2"]            # 每个样本的 Hotelling T²
-r["SPE"]           # 每个样本的 Q 残差
 r["t2_alarm"]      # T² 是否超限
 r["spe_alarm"]     # SPE 是否超限
-r["t2_limit"]      # T² 控制限
-r["spe_limit"]     # SPE 控制限
 r["contribution"]  # 各波长对 SPE 的贡献，定位「哪个波长段出问题」
 ```
 
-贡献图把 SPE 拆回波长，直接指出异常来自哪个波段：
-
-```python
-from aimeta.viz import plots
-plots.plot_contribution(wl, r["contribution"])   # SPE 贡献图
-```
-
-#### 训练数据清洗：标记异常供人工删除
-
-异常样本会抬高控制限、污染建模。清洗采用**人工在环**流程——工具只负责标记候选，
-删除由人拍板：
-
-```python
-from aimeta.monitoring import flag_outliers
-
-res = flag_outliers(X, n_components=5, alpha=0.05, by="spe")
-res["idx"]          # 候选样本下标，按「最可疑」从高到低排
-res["SPE"]          # 对应 Q 残差
-res["spe_alarm"]    # 是否超过 SPE 控制限
-res["contribution"] # 各波长对 SPE 的贡献，用于人工看异常来源
-```
-
-人工逐一看最可疑的几个，结合 `contribution` 贡献图判断异常是否来自真实的
-污染 / 异物（而非正常波动），再决定删除哪些：
-
-```python
-drop = [res["idx"][0], res["idx"][2]]   # 人工决定要删的下标
-X = np.delete(X, drop, axis=0)
-# 删完重跑 flag_outliers，看是否还有要删的，直到满意
-```
-
-每一轮「标记 → 人工删 → 重跑」都由人控制，避免自动删除误伤正常样本。
-
-交互式演示（T² vs SPE 散点 + 选删 + 重算重画）见 [`notebooks/mspc_outlier_clean.ipynb`](notebooks/mspc_outlier_clean.ipynb)。
-
-#### 预测值控制图
+再配合预测值控制图检测慢漂移：
 
 ```python
 from aimeta.monitoring import shewhart_limits, cusum
