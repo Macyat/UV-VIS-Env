@@ -106,6 +106,7 @@ ai-meta/
 │   ├── test_transfer.py             # 合成双仪器：DS/PDS 应把预测偏差降到阈值以下
 │   └── test_fom.py
 ├── standards/                      # 金标准依据（化学法 / 标准物质 / 检定规程）
-│   └── metrics/                    # 各指标金标准 PDF（GB3838 阈值 + HJ 915.3-2024 程序 + 各参数 HJ/GB 方法）
+│   ├── gold_standards/             # 各水质参数检测方法标准（CODMn/TP/AN/TN/COD/TUR 的 GB/HJ 方法）
+│   └── （其余计量与仪器标准：GB 3838 / HJ 915.3 / JJG 178 / ASTM E275）
 ├── docs/
 └── pyproject.toml                   # 声明包、依赖分组、entry_points
