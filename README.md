@@ -70,7 +70,7 @@ print(card)          # <ModelCard TN/pls @ai14 ... n_components=11 rmse_cv=0.11>
 # 4. 推理（自动套用卡内记录的预处理链）
 pred = predict(card, X)
 ```
-备注：此例子仅为简易建模示例，未对按数据分布对数据进行选取。实验室样本需要考虑样本代表性（e.g.SPXY），河流样本需要按时间序列处理方式交叉验证（Walk-forward validation：rolling/expanding）。
+备注：此例子仅为简易建模示例，未对按数据分布对数据进行选取，亦未含验证集。鲁棒建模需要避免仅选取高相似数据，例如实验室样本需要考虑样本代表性（e.g.SPXY），河流样本需要按时间序列处理方式交叉验证（Walk-forward validation：rolling/expanding）。
 
 ---
 
