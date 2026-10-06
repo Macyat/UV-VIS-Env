@@ -1,4 +1,4 @@
-"""统一绘图主题：一处定义，全局一致。"""
+"""统一可视化主题：一处定义，全局一致。"""
 from __future__ import annotations
 
 import os

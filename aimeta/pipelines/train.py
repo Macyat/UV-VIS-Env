@@ -3,7 +3,7 @@
 与老 ``Train.py`` 的差别：
     - 预处理链来自 YAML，与部署端同源
     - 模型从注册表取，不再 match-case
-    - 产出是 ModelCard（含指纹与 FOM），不是裸 .pkl
+    - 产出是 ModelCard（含指纹与指标），不是裸 .pkl
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def select_n_components(
     max_components: int = 20, folds: int = 5,
     model_params: Optional[Dict[str, Any]] = None,
 ) -> int:
-    """按 PLS_toolbox 惯例为潜变量模型选择维数 n_components。
+    """按 PLS_toolbox routine为潜变量模型选择维数 n_components。
 
     对 n_components = 1..k 逐一做 K 折交叉验证（取 RMSE），返回误差最小者。
     k = min(max_components, n_samples // folds, n_features)，保证每个 CV 折的
@@ -100,7 +100,7 @@ def train_model(
 
     params = dict(model_params or {})
     # 潜变量模型（PLS/PCR）：未显式给 n_components 时，按 CV 遍历 1..k 取交叉验证
-    # 误差最小的维数（PLS_toolbox 惯例）。显式给了就以手填为准。
+    # 误差最小的维数（PLS_toolbox routine）。显式给了就以手填为准。
     if model_meta(model_key).get("family") == "latent" and "n_components" not in params:
         params["n_components"] = select_n_components(
             X, y, model_key=model_key, folds=folds)
@@ -151,3 +151,32 @@ def sweep(
         for k in model_keys
     ]
     return sorted(cards, key=lambda c: c.fom.get("rmse_cv", np.inf))
+
+
+def sweep_grid(
+    spectra: SpectrumSet,
+    label: str,
+    model_keys: Sequence[str] = ("pls", "ridge", "lasso", "ols"),
+    chains: Optional[Sequence[Iterable[Dict[str, Any]]]] = None,
+    model_params: Optional[Dict[str, Dict[str, Any]]] = None,
+    param_def: Optional[WaterParam] = None,
+    folds: int = 5,
+    instrument_id: str = "unknown",
+) -> List[ModelCard]:
+    """候选池：跨「预处理链 × 模型」全量枚举（取代手填单链 sweep）。
+
+    每个 (chain, model) 组合训一个 ModelCard，返回全部候选（未排序）。
+    排序/选 TOP K 交给 ``scoring.score_cards`` / ``select_top_k``。
+
+    Args:
+        chains: 预处理链列表；为 None 时退化为单条空链（等价于 ``sweep``）。
+    """
+    model_params = model_params or {}
+    chain_list = list(chains) if chains is not None else [[]]
+    cards: List[ModelCard] = []
+    for chain in chain_list:
+        for k in model_keys:
+            cards.append(train_model(
+                spectra, label, k, chain, model_params.get(k),
+                param_def, folds, instrument_id))
+    return cards

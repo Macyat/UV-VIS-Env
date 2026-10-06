@@ -1,4 +1,4 @@
-"""计量验收：品质因数与 GB3838 判定。"""
+"""计量验收：指标与 GB3838 判定。"""
 import numpy as np
 import pytest
 
@@ -37,14 +37,14 @@ def test_regression_vector_and_sensitivity(linear_setup):
     assert abs(sensitivity(b) - 1 / np.linalg.norm(coef)) < 1e-12
 
 
-def test_fom_lod_is_finite_and_positive(linear_setup):
+def test_metric_lod_is_finite_and_positive(linear_setup):
     model, X, coef = linear_setup
     rng = np.random.default_rng(2)
     blank = rng.normal(0, 1e-3, (8, X.shape[1]))     # 空白必须有噪声，否则 s_0 = 0
-    fom = figures_of_merit(model, blank, X_cal=X)
-    assert fom["LOD"] > 0 and np.isfinite(fom["LOD"])
-    assert fom["LOQ"] > fom["LOD"]
-    assert fom["SEN"] > 0 and fom["gamma"] > 0
+    metric = figures_of_merit(model, blank, X_cal=X)
+    assert metric["LOD"] > 0 and np.isfinite(metric["LOD"])
+    assert metric["LOQ"] > metric["LOD"]
+    assert metric["SEN"] > 0 and metric["gamma"] > 0
 
 
 def test_weaker_signal_gives_worse_lod():

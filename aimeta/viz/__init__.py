@@ -7,5 +7,6 @@
 """
 from .theme import apply_theme, save_fig, COLORS
 from . import plots  # noqa: F401
+from . import report  # noqa: F401
 
-__all__ = ["apply_theme", "save_fig", "COLORS", "plots"]
+__all__ = ["apply_theme", "save_fig", "COLORS", "plots", "report"]

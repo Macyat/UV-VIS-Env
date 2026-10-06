@@ -1,0 +1,110 @@
+ai-meta/
+├── aimeta/                          # 主包（取代根目录散落脚本）
+│   ├── core/
+│   │   ├── spectra.py               # SpectrumSet：波长轴 + 吸光度 + 元数据(仪器ID/时间/站点)
+│   │   ├── registry.py              # 通用注册表：@register("pls")
+│   │   └── artifact.py              # ModelCard：预处理链指纹 + 波长轴 + 数据版本 + 指标 + 仪器ID
+│   ├── preprocessing/               # 【预处理工具箱】  ← 书 3.01/3.02/3.06/3.08/3.11
+│   │   ├── base.py                  # Transformer 基类 + 链 DSL（可 YAML 序列化）
+│   │   ├── smooth.py                # SG / DERIV(Gram) / 移动平均
+│   │   ├── derivatives.py           # 一阶/二阶导数
+│   │   ├── denoise.py               # 小波阈值 / EMD / PCA 去噪
+│   │   ├── scatter.py               # SNV / MSC / EMSC / 归一化 / 基线校正
+│   │   ├── alignment.py             # 波长轴对齐 / 变量漂移        ← 书 3.05
+│   │   ├── orthogonal.py            # OSC / OPLS / GLSW / EPO      ← 书 3.11
+│   │   ├── evaluate.py              # 预处理的客观评价              ← 书 3.02
+│   │   └── presets.py               # 命名预设链（dayu_v1 = SG(15,3)→sym4→SNV）
+│   ├── models/                      # 【模型库】  ← 书 3.12/3.14/3.15, 2.06–2.15, 3.21
+│   │   ├── registry.py
+│   │   ├── linear.py                # OLS/Ridge/Lasso/ElasticNet/OMP/Lars/TheilSen/Huber/RANSAC/Quantile/SGD/PassiveAggressive
+│   │   ├── glm.py                   # Gamma/Poisson/Tweedie/负二项 + 过度离散自动诊断
+│   │   ├── latent.py                # PCR / PLS / PLS1 / SIMPLS / 多响应 PLS
+│   │   ├── kernel.py                # GPR（核库）/ SVR / KRR
+│   │   ├── trees.py                 # LGBM / XGBoost / RandomForest
+│   │   ├── nn.py                    # MLP / 1D-CNN / SpectralModel(torch)
+│   │   ├── curve_resolution/        # 【MCR 专区】  ← 书 2.06–2.15
+│   │   │   ├── mcr_als.py           # ALS + 约束（非负/单峰/闭合/硬度）
+│   │   │   ├── initializers.py      # SIMPLISMA / OPA / KSFA 纯变量检测
+│   │   │   ├── efa.py               # EFA / FSMW-EFA 定化学秩
+│   │   │   ├── ambiguity.py         # AFS / MCR-BANDS 模糊性带
+│   │   │   ├── multiset.py          # 扩展 MCR（多批次/多站点/多季节联合解析）
+│   │   │   └── hard_model.py        # 硬建模（动力学/平衡约束）  ← 书 3.21
+│   │   ├── ensembles.py             # AdaBoost / Stacking / 多模型融合  ← 书 3.16
+│   │   └── wrappers.py              # WaterQualityModel（x/y 缩放 + 上下限截断）
+│   ├── selection/                   # 【变量选择】  ← 书 3.13
+│   │   ├── cars.py                  # 现有 CARS.py 迁移
+│   │   ├── uve.py                   # UVE-PLS / MCUVE
+│   │   ├── ipls.py                  # 区间 PLS
+│   │   ├── ga.py                    # 遗传算法
+│   │   └── stability.py             # 稳定性选择 / 随机检验（防过拟合）
+│   ├── transfer/                    # 【仪器迁移工具箱】  ← 书 3.18  ★新增
+│   │   ├── base.py
+│   │   ├── ds.py                    # Direct Standardization
+│   │   ├── pds.py                   # Piecewise DS（含窗口选择）
+│   │   ├── sbc.py                   # Slope/Bias Correction
+│   │   ├── glsw.py                  # GLSW 滤波（不做标准化的传递）
+│   │   ├── domain_adapt.py          # CORAL / 均值方差对齐 / 稳健全局模型
+│   │   ├── sample_selection.py      # 标准化样本选择（Kennard-Stone / D-最优 / leverage）
+│   │   └── diagnose.py              # 仪器差异诊断（波长漂移、增益差、残差谱）
+│   ├── stats/                       # 【统计工具箱】  ← 书 1.01/4.04
+│   │   ├── hypothesis.py            # t/F/Cochran/Bartlett/Levene/Grubbs/D'Agostino
+│   │   ├── intervals.py             # 置信区间 + b-content / b-expectation 容忍区间
+│   │   ├── anova.py                 # 固定/随机效应 ANOVA + 功效分析
+│   │   ├── resampling.py            # Bootstrap / 置换检验
+│   │   ├── glm_stats.py             # GAM + 交互项检验  ← 书 4.04
+│   │   └── outliers.py              # 一致性分析、稳健估计、离群处理
+│   ├── metrics/                     # 【计量验收】  ← 书 2.20 + GB3838
+│   │   ├── figures_of_merit.py      # 灵敏度/分析灵敏度/选择性/**多元 LOD、LOQ**/预测不确定度
+│   │   ├── water_standards.py       # GB3838 类别判定 + 跨类别误判矩阵
+│   │   ├── daily.py                 # daily R²、报警准确率/误报率、MAPE/RMSE
+│   │   ├── drift.py                 # 长期漂移、重复性、CUSUM 趋势
+│   │   └── acceptance.py            # 验收规则引擎（阈值可配置 → 出合格证）
+│   ├── monitoring/                  # 【在线监控】  ← 书 4.09/4.11  ★新增
+│   │   ├── control_charts.py        # Shewhart / CUSUM / EWMA + ARL（含自相关修正）
+│   │   ├── mspc.py                  # PCA/PLS 的 T² / SPE / 贡献图
+│   │   ├── adaptive.py              # 自适应潜变量模型（抗探头污染/季节漂移）
+│   │   └── autocorrelation.py       # 自相关过程的控制限修正
+│   ├── viz/                         # 【可视化包】  ★新增
+│   │   ├── spectra.py               # 光谱叠图/导数图/峰位标注/差谱
+│   │   ├── diagnostics.py           # 预测-实测/残差/Bland-Altman/QQ/残差 vs 浊度
+│   │   ├── latent.py                # 得分图/载荷图/解释方差/Hotelling T²
+│   │   ├── mcr.py                   # 分辨谱图 + 浓度剖面 + 模糊性带
+│   │   ├── transfer.py              # 迁移前后光谱对齐、标准化残差图
+│   │   ├── monitoring.py            # 控制图、贡献图、漂移趋势
+│   │   ├── report.py                # HTML/PDF 自动验收报告
+│   │   └── theme.py                 # 统一配色/字体/导出 dpi
+│   ├── io/                          # arff / csv / obs 同步 + YAML 配置加载
+│   │   ├── arff.py
+│   │   ├── csv_.py
+│   │   ├── obs.py
+│   │   └── config.py
+│   ├── pipelines/                   # 编排
+│   │   ├── train.py                 # 取代 Train.py
+│   │   ├── sweep.py                 # 取代 run.py 的 subprocess fork
+│   │   ├── infer.py                 # 取代 river_inference.py / standard_solution_inference.py
+│   │   └── validate.py
+│   └── cli.py                       # aimeta train | infer | transfer | report | monitor
+├── configs/
+│   ├── params.yaml                  # 水质参数定义 ← 取代 preprocessing.get_configs 的 if-elif
+│   ├── preprocessing/
+│   │   └── dayu_v1.yaml
+│   ├── models/
+│   │   └── default.yaml
+│   └── instruments/
+│       ├── ai14.yaml                # master
+│       ├── ai17.yaml
+│       ├── ai18.yaml
+│       └── ai28.yaml
+├── edge/                            # 工控机侧
+│   ├── runtime/                     # 工控机推理运行时（依赖 numpy / scipy / PyWavelets）
+│   └── packaging.py                 # 从 ModelCard 生成单台设备部署包
+├── experiments/                     # 实验产物（按 run_id 归档：figs/metrics/models/results）
+├── tests/
+│   ├── test_preprocessing.py        # 保留：test_deriv_matches_scipy
+│   ├── test_train_serve_parity.py   # ★新增：训练端与 edge 端逐元素一致
+│   ├── test_registry.py
+│   ├── test_transfer.py             # 合成双仪器：DS/PDS 应把预测偏差降到阈值以下
+│   └── test_fom.py
+├── gold_standard/                  # 化学法金标准依据（GB3838 阈值 + HJ 915.3-2024 程序）
+├── docs/
+└── pyproject.toml                   # 声明包、依赖分组、entry_points

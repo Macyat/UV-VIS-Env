@@ -68,7 +68,7 @@ def test_select_n_components_in_range(data):
 
 
 def test_pls_autoselects_n_components_when_omitted(data):
-    """未显式给 n_components 时，train_model 应按 PLS_toolbox 惯例 CV 自动选维。"""
+    """未显式给 n_components 时，train_model 应按 PLS_toolbox routine CV 自动选维。"""
     wl, X, y = data
     card = train_model(SpectrumSet(X=X, wavelengths=wl, y=y), "AN", "pls",
                        chain=[{"op": "snv"}], instrument_id="ai14")

@@ -1,4 +1,4 @@
-"""品质因数（Figures of Merit，）。
+"""指标（Figures of Merit，FOM）。
 
 多元校正下的定义（Olivieri 体系）：
 
@@ -74,12 +74,16 @@ def figures_of_merit(
     X_cal: Optional[np.ndarray] = None,
     s_target: Optional[np.ndarray] = None,
 ) -> Dict[str, float]:
-    """一次性算出全部品质因数。
+    """一次性算出全部指标。
 
     Args:
         model:    拟合好的模型（fit/predict 接口）
-        X_blank:  空白 / 接近检出限的样本光谱 (n_blank, p)，
-                  **必须与模型训练时处于同一输入空间**（即已过预处理链）
+        X_blank:  空白样本光谱 (n_blank, p)，即与样品基质一致、不含待测物的
+                  溶剂（UV 水质场景即纯净水/去离子水；地表水取不到绝对零浓度时，
+                  可近似为近检出限的低浓度水样，但优先纯水/去离子水）；
+                  必须保留原始测量噪声、且未被替为 LOD/2；
+                  **必须与模型训练时处于同一输入空间**（即已过预处理链）；
+                  **建议同条件独立重复 ≥10 组**（最少 ≥2，n_blank=1 时 s_0 静默退化为 0）
         X_cal:    校正集光谱（可选，用于估计工作点）
         s_target: 目标组分的净信号光谱（可选，用于算选择性）
 
