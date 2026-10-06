@@ -93,8 +93,9 @@ ai-meta/
 │   ├── pipelines/       训练 / 模型筛选 / 推理
 │   └── cli.py           命令行入口
 ├── configs/            参数定义、预处理链、仪器档案
-├── standards/          各指标金标准（原 gold_standard）
-│   └── metrics/        按指标分目录存放金标准 PDF（10 份）
+├── standards/          金标准与计量标准（原 gold_standard）
+│   ├── gold_standards/ 各水质参数检测方法标准（CODMn / TP / AN / TN / COD / TUR，6 份）
+│   └── （其余计量与仪器标准：GB 3838 / HJ 915.3 / JJG 178 / ASTM E275）
 ├── edge/               工控机运行时（依赖 numpy / scipy / PyWavelets）
 ├── deploy/             部署 SOP 文档
 │   ├── 标液模型部署和测试.docx
@@ -179,6 +180,7 @@ pipe.to_config()        # [{'op': 'savgol', 'window': 15, 'polyorder': 3, 'deriv
 ```python
 from aimeta.models.registry import list_models
 from aimeta.pipelines.train import sweep
+from aimeta.pipelines.scoring import score_cards, select_top_k
 
 print(list_models())               # ['ols', 'ridge', 'lasso', 'pls', 'gpr', 'lgbm', ...]
 
@@ -187,7 +189,12 @@ cards = sweep(spectra, "TN",
               chain=chain,
               param_def=params["TN"],
               folds=5)
-best = min(cards, key=lambda c: c.fom["rmse_cv"])   # 显式取 rmse_cv 最小者，不依赖列表顺序
+
+# 综合打分：验收指标全集 10 项分量排名求和（alarm_acc/alarm_err/mape/r2_score/
+# daily_r2_score/daily_pearson_r_score/rmse/合格率/坏分组比/durbin_watson），
+# rank 越小越优——选最优据此综合打分，而非只看 rmse_cv
+ranked = score_cards(cards, X_val, y_val, params["TN"], day_idx)
+best = select_top_k(cards, 1, X_val, y_val, params["TN"], day_idx)[0]
 ```
 
 新增模型只需注册，无需改动其他文件：
@@ -285,13 +292,76 @@ print(rep["rmse"], rep["acceptance_rate"], rep["daily_r2"])
 
 ### 在线监控
 
-```python
-from aimeta.monitoring import MSPC, shewhart_limits, cusum
+#### 异常值筛选：T²（Hotelling）与 SPE（Q 残差）
 
-m = MSPC(n_components=5).fit(X_normal)      # 用正常时期的光谱建模
+`MSPC` 用潜变量把整条光谱压成两个互补的统计量，二者各自设控制限、联合判断样本是否异常：
+
+| 统计量 | 含义 | 报警含义 |
+|---|---|---|
+| T²（Hotelling） | 模型内部变异：样本在正常波动方向上偏离多远 | 沿正常方向偏离过大（如浓度极端） |
+| SPE（Q 残差） | 模型解释不了的新变异 | 出现模型未见过的新结构（探头污染、气泡、异物） |
+
+控制限取 `alpha` 分位（T² 用 F 分布，SPE 用 Jackson–Mudholkar 卡方近似）。联合判读：
+
+- T² 正常、SPE 正常 → 受控；
+- T² 正常、SPE 高 → 出现模型未见过的新结构（污染 / 异物）；
+- T² 高、SPE 正常 → 沿正常方向但偏离极端（如超高浓度）；
+- T² 高、SPE 高 → 严重异常。
+
+```python
+from aimeta.monitoring import MSPC
+
+m = MSPC(n_components=5, alpha=0.05).fit(X_normal)   # 用正常时期的光谱建模
 r = m.monitor(X_new)
-r["spe_alarm"]      # 是否出现异常（探头污染、气泡、异物通常由此体现）
-r["contribution"]   # 各波长对异常的贡献，用于定位问题波段
+
+r["T2"]            # 每个样本的 Hotelling T²
+r["SPE"]           # 每个样本的 Q 残差
+r["t2_alarm"]      # T² 是否超限
+r["spe_alarm"]     # SPE 是否超限
+r["t2_limit"]      # T² 控制限
+r["spe_limit"]     # SPE 控制限
+r["contribution"]  # 各波长对 SPE 的贡献，定位「哪个波长段出问题」
+```
+
+贡献图把 SPE 拆回波长，直接指出异常来自哪个波段：
+
+```python
+from aimeta.viz import plots
+plots.plot_contribution(wl, r["contribution"])   # SPE 贡献图
+```
+
+#### 训练数据清洗：标记异常供人工删除
+
+异常样本会抬高控制限、污染建模。清洗采用**人工在环**流程——工具只负责标记候选，
+删除由人拍板：
+
+```python
+from aimeta.monitoring import flag_outliers
+
+res = flag_outliers(X, n_components=5, alpha=0.05, by="spe")
+res["idx"]          # 候选样本下标，按「最可疑」从高到低排
+res["SPE"]          # 对应 Q 残差
+res["spe_alarm"]    # 是否超过 SPE 控制限
+res["contribution"] # 各波长对 SPE 的贡献，用于人工看异常来源
+```
+
+人工逐一看最可疑的几个，结合 `contribution` 贡献图判断异常是否来自真实的
+污染 / 异物（而非正常波动），再决定删除哪些：
+
+```python
+drop = [res["idx"][0], res["idx"][2]]   # 人工决定要删的下标
+X = np.delete(X, drop, axis=0)
+# 删完重跑 flag_outliers，看是否还有要删的，直到满意
+```
+
+每一轮「标记 → 人工删 → 重跑」都由人控制，避免自动删除误伤正常样本。
+
+交互式演示（T² vs SPE 散点 + 选删 + 重算重画）见 [`notebooks/mspc_outlier_clean.ipynb`](notebooks/mspc_outlier_clean.ipynb)。
+
+#### 预测值控制图
+
+```python
+from aimeta.monitoring import shewhart_limits, cusum
 
 cl, lcl, ucl = shewhart_limits(pred_series)  # 预测值序列的控制限（含自相关修正）
 cusum(pred_series, k=0.5, h=5.0)             # 慢漂移检测
