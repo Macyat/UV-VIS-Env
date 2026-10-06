@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aimeta"
+version = "0.1.0"
+description = "UV-Vis 光谱水质软测量算法库（Comprehensive Chemometrics 方法体系落地）"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "scikit-learn>=1.3",
+    "pandas>=2.0",
+    "PyWavelets>=1.4",
+    "PyYAML>=6.0",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+full = ["lightgbm", "torch", "pyMCR", "statsmodels"]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["aimeta*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

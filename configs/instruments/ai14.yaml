@@ -1,0 +1,17 @@
+# ai14：主仪器（master）
+#
+# 迁移策略：以其余工控机为 slave，用标液在两台机上各跑一遍得到标准化样本，
+# 再做 PDS/DS，从而让 ai17/ai18/ai28 复用 ai14 的模型，
+# 而不是每台机各训一套（现状：local_regression_scripts/ai*/ 四套重复脚本）。
+instrument_id: ai14
+role: master
+
+optics:
+  wavelength_start: 200
+  wavelength_end: 720
+  wavelength_step: 1
+  path_length_cm: 1.0
+
+transfer:
+  standardization_samples: configs/standards/dayu_std_set_v3.yaml
+  recalibration: monthly

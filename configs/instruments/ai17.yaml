@@ -1,0 +1,23 @@
+# ai17：从机（slave）
+#
+# master 为 ai14。上线流程：
+#   1. 在 ai14 与 ai17 上跑同一套标液 → 得到 (X_slave, X_master) 光谱对
+#   2. python -m aimeta.cli transfer --slave ai17 --master ai14 --method auto
+#   3. 若推荐 align_then_pds，先做波长轴对齐再 standardize
+#   4. 用 ai14 的 ModelCard + 迁移矩阵直接推理，并用 verify_against_card 校验
+instrument_id: ai17
+role: slave
+
+optics:
+  wavelength_start: 200
+  wavelength_end: 720
+  wavelength_step: 1
+  path_length_cm: 1.0
+
+transfer:
+  master: ai14
+  method: auto          # auto | pds | ds | sbc | glsw | meanvar
+  pds_window: 5
+  fallback: sbc         # 标准化样本不足时降级
+  standardization_samples: configs/standards/dayu_std_set_v3.yaml
+  recalibration: monthly
