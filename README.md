@@ -86,7 +86,7 @@ ai-meta/
 │   ├── transfer/        仪器间迁移（DS / PDS / SBC / GLSW）+ 硬件差异诊断（波长漂移 / 增益）
 │   ├── stats/           假设检验、置信区间、容忍区间
 │   ├── metrics/         分析方法品质因数（FOM：LOD / LOQ / 灵敏度 / 选择性）+ GB3838 类别判定
-│   ├── hardware_eval.py 光谱仪硬件评价 / 出厂检验（暗噪声 / 基线 / 波长准确度 / 光度准确度 / 杂散光 / SNR / 分辨率）
+│   ├── hardware_eval.py 光谱仪硬件评价 / 入库检验（暗噪声 / 基线 / 波长准确度 / 光度准确度 / 杂散光 / SNR / 分辨率）
 │   ├── monitoring/      控制图（Shewhart / CUSUM / EWMA）与 MSPC
 │   ├── viz/             可视化
 │   ├── io/              配置加载、ARFF 读取
@@ -111,7 +111,7 @@ ai-meta/
 | `transfer` | 跨仪器迁移 / 硬件差异诊断 | `PiecewiseDirectStandardization`、`DirectStandardization`、`recommend_method`、`estimate_wavelength_shift` |
 | `stats` | 统计检验 | `consistency_report`、`tolerance_interval`、`confidence_interval_mean` |
 | `metrics` | 分析方法品质因数（FOM）+ 计量验收 | `figures_of_merit`、`acceptance_report`、`daily_r2`、`alarm_accuracy` |
-| `hardware_eval` | 光谱仪硬件评价 / 出厂检验 | `evaluate_instrument`、`wavelength_accuracy`、`photometric_accuracy`、`stray_light`、`resolution`、`dark_noise` |
+| `hardware_eval` | 光谱仪硬件评价 / 入库检验 | `evaluate_instrument`、`wavelength_accuracy`、`photometric_accuracy`、`stray_light`、`resolution`、`dark_noise` |
 | `monitoring` | 在线监控 | `MSPC`、`shewhart_limits`、`cusum`、`ewma` |
 | `viz` | 可视化 | `plots.plot_spectra`、`plots.plot_pred_vs_actual`、`save_fig` |
 | `io` | 配置与数据 | `load_params`、`load_chain`、`load_instrument`、`read_arff` |
@@ -452,10 +452,10 @@ FOM（Figures of Merit，品质因数）评价**分析方法 / 校正模型**本
 - **杂散光（stray light）**：抬高基线、压低吸光度上限。
 - **分辨率**：能否分辨相邻吸收峰。
 
-> 本节与下方「第 3 节 出厂检验」的计算函数**不假设扫描机构**，对**光纤 / 阵列光谱仪（固定光栅、无机械光栅）同样适用**；其失效模式差异见第 3 节「适用说明：光纤 / 阵列光谱仪」。
+> 本节与下方「第 3 节 入库检验」的计算函数**不假设扫描机构**，对**光纤 / 阵列光谱仪（固定光栅、无机械光栅）同样适用**；其失效模式差异见第 3 节「适用说明：光纤 / 阵列光谱仪」。
 
 #### 本库当前实现：仪器间差异诊断
-本库不是做逐项出厂检验，而是提供"两台机差在哪、该不该 / 怎么迁移"的**门控诊断**（`aimeta/transfer/diagnose.py`）：
+本库不是做逐项入库检验，而是提供"两台机差在哪、该不该 / 怎么迁移"的**门控诊断**（`aimeta/transfer/diagnose.py`）：
 
 - `estimate_wavelength_shift`：用平均光谱互相关估计 slave 相对 master 的波长偏移（nm）。
 - `estimate_gain_offset`：逐波长增益 / 偏置（master ≈ gain·slave + offset）；增益随波长变化明显 → 差异是"逐波长"的，PDS 比 DS 合适。
@@ -484,7 +484,7 @@ print(diag["method"], diag["shift_nm"], diag["reason"])
 #### 注意事项
 - 波长漂移 > 0.5 nm 必须先做波长轴对齐，否则 DS / PDS 在学一个错位映射。
 - SNR、杂散光、分辨率等**出厂规格**请对照仪器 datasheet / 检定规程核验；本库不直接测这些，
-  只从实测光谱**诊断跨机差异**。要做逐项出厂检验需另接标准物质与测试流程。
+  只从实测光谱**诊断跨机差异**。要做逐项入库检验需另接标准物质与测试流程。
 
 #### 参考文献
 - 仪器间校准 / 迁移与差异诊断（DS / PDS / SBC / GLSW）：见 `aimeta/transfer/` 与 `docs/重构方案.md`。
@@ -496,7 +496,7 @@ print(diag["method"], diag["shift_nm"], diag["reason"])
 ### 3. 光谱仪硬件入库检验方案
 
 #### 概念与口径
-在把仪器搬去现场 / 复用模型之前，按紫外-可见分光光度计的计量检验口径做**逐项出厂检验**。
+在把仪器搬去现场 / 复用模型之前，按紫外-可见分光光度计的计量检验口径做**逐项入库检验**。
 本库 `aimeta/hardware_eval.py` 提供从实测光谱**计算指标**的函数；标准物质 / 滤光片由使用方按检定规程准备。
 主要依据：**JJG 178《紫外、可见、近红外分光光度计》检定规程**、**ASTM E275** 系列。
 
