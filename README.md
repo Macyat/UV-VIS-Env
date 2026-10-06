@@ -39,7 +39,7 @@ from aimeta.pipelines.train import train_model
 from aimeta.pipelines.infer import predict
 
 # 1. 准备数据：吸光度矩阵 + 波长轴 + 标签
-#    示例数据见 Data/Example1/（西坑站：437 样本 × 611 波长 190–800 nm，目标 TN）
+#    示例数据见 Data/Example1/（437 样本 × 611 波长 190–800 nm，目标 TN）
 X = np.load("Data/Example1/spectra.npy")        # (n_samples, n_wavelengths)
 wl = np.load("Data/Example1/wavelengths.npy")   # (n_wavelengths,) = 190..800 nm
 tn = np.load("Data/Example1/tn.npy")            # (n_samples,)
@@ -163,7 +163,7 @@ pipe.to_config()        # [{'op': 'savgol', 'window': 15, 'polyorder': 3, 'deriv
 | `snv` | 标准正态变换（逐条光谱） | 是 |
 | `msc` | 多元散射校正 | 是 |
 | `mean_center` / `column_scale` | 列中心化 / 列标准化 | 是 |
-| `wavelet` | 小波软阈值去噪（`sym4`） | 否 |
+| `wavelet` | 小波软阈值去噪（`sym4`） | 是（需安装 PyWavelets） |
 
 ### 建模与模型筛选
 
@@ -178,7 +178,7 @@ cards = sweep(spectra, "TN",
               chain=chain,
               param_def=params["TN"],
               folds=5)
-best = cards[0]                    # 已按 rmse_cv 升序排列
+best = min(cards, key=lambda c: c.fom["rmse_cv"])   # 显式取 rmse_cv 最小者，不依赖列表顺序
 ```
 
 新增模型只需注册，无需改动其他文件：
@@ -219,7 +219,8 @@ top = select_top_k(cards, 3, X_val, y_val, params["TN"], day_idx)
 y_fused, info = fuse_predict(top, X_new, scheme="inv_rmse2", param=params["TN"])
 print(info["scheme"], info["weights"])
 
-# 5) 每个候选一套图 + 打分表 CSV，落到 out_dir/figures 与 out_dir/scoring.csv
+# 5) 每个候选画一套诊断图（落到 out_dir/figures）；所有候选的打分表汇总到
+#    同一个 out_dir/scoring.csv（一起横向比较，而非每个候选各一个 csv）
 export_top_k_report(cards, X_val, y_val, params["TN"], out_dir, k=3, day_idx=day_idx)
 ```
 
@@ -400,7 +401,7 @@ FOM（Figures of Merit，品质因数）评价**分析方法 / 校正模型**本
 - **已拟合模型**：来自校正集（多种浓度标液 / 水样建校正曲线）。
 - **空白样本 `X_blank`**：与样品基质一致、不含被测物的溶剂（纯净水 / 去离子水）。
   同条件**独立重复 ≥10 组**（最少 ≥2，否则 `s_0` 静默退化为 0 → `LOD=0`）。
-  必须**保留原始噪声、未被替为 LOD/2**，且**已过同一预处理链**。
+  必须**保留原始噪声**，且**已过同一预处理链**。
 - **`X_cal`（可选）**：校正集光谱，用于取工作点（默认取 `X_blank` 均值）。
 - **`s_target`（可选）**：目标组分纯组分光谱，用于算 `SEL`。
 
@@ -422,8 +423,8 @@ FOM（Figures of Merit，品质因数）评价**分析方法 / 校正模型**本
 4. 调用 `figures_of_merit(card.estimator, X_blank_p, X_cal=X_train_p)`。
 5. 读取 `SEN / γ / LOD / LOQ / SEL`。
 
-#### 坑与判据
-- `n_blank` 必须 **≥2**（≥10 推荐）；`n_blank=1` 时 `s_0` 静默退化为 0，`LOD=0` 坏掉。
+#### 注意事项
+- `n_blank` 必须 **≥2**（≥10 推荐）；`n_blank=1` 时 `s_0` 静默退化为 0，`LOD=0` 失效。
 - 空白必须过预处理链且保留噪声；喂原始光谱或 `LOD/2` 替值 → 预测全相同 →
   `SEN/LOD` 退化 `inf`（代码 `figures_of_merit.py` 第 99–103 行告警）。
 - `SEN` **尺度相关**（受 y 标准化、校正集浓度范围影响），仅用于候选模型间横向比较，
@@ -450,6 +451,8 @@ FOM（Figures of Merit，品质因数）评价**分析方法 / 校正模型**本
 - **信噪比（SNR）、暗噪声、基线稳定性**：决定你实测到的 `s_x`（方法噪声里含硬件噪声）。
 - **杂散光（stray light）**：抬高基线、压低吸光度上限。
 - **分辨率**：能否分辨相邻吸收峰。
+
+> 本节与下方「第 3 节 出厂检验」的计算函数**不假设扫描机构**，对**光纤 / 阵列光谱仪（固定光栅、无机械光栅）同样适用**；其失效模式差异见第 3 节「适用说明：光纤 / 阵列光谱仪」。
 
 #### 本库当前实现：仪器间差异诊断
 本库不是做逐项出厂检验，而是提供"两台机差在哪、该不该 / 怎么迁移"的**门控诊断**（`aimeta/transfer/diagnose.py`）：
@@ -478,7 +481,7 @@ diag = recommend_method(wl, X_slave, X_master, n_std_samples=len(X_slave))
 print(diag["method"], diag["shift_nm"], diag["reason"])
 ```
 
-#### 坑与判据
+#### 注意事项
 - 波长漂移 > 0.5 nm 必须先做波长轴对齐，否则 DS / PDS 在学一个错位映射。
 - SNR、杂散光、分辨率等**出厂规格**请对照仪器 datasheet / 检定规程核验；本库不直接测这些，
   只从实测光谱**诊断跨机差异**。要做逐项出厂检验需另接标准物质与测试流程。
@@ -490,7 +493,7 @@ print(diag["method"], diag["shift_nm"], diag["reason"])
 
 ---
 
-### 3. 光谱仪硬件出厂检验方案
+### 3. 光谱仪硬件入库检验方案
 
 #### 概念与口径
 在把仪器搬去现场 / 复用模型之前，按紫外-可见分光光度计的计量检验口径做**逐项出厂检验**。
@@ -498,15 +501,15 @@ print(diag["method"], diag["shift_nm"], diag["reason"])
 主要依据：**JJG 178《紫外、可见、近红外分光光度计》检定规程**、**ASTM E275** 系列。
 
 #### 检验项目与所需标准物质
-| 项目 | 计算方法 | 所需标准物质 / 滤光片 | 典型合格判据 |
+| 项目 | 需要的工具 / 标准物质 | 操作过程 / 计算原理 | 典型合格判据 |
 |---|---|---|---|
-| 波长准确度 | 测已知峰位，比较实测峰位（`wavelength_accuracy`） | 钬玻璃 / 钬氧化物（279.4 / 287.5 / 333.7 / 360.9 / 418.5 / 453.2 / 536.2 / 637.5 nm） | 误差 ≤ 0.5 nm |
-| 光度准确度 | 在已知吸光度点比较（`photometric_accuracy`） | 中性密度片 / 重铬酸钾标准溶液 | ≤ 0.002 A（或 0.3 %T） |
-| 杂散光 | 截止滤光片完全吸收处测残余透射（`stray_light`） | NaI / Corning 截止滤光片（如 340 nm） | ≤ 0.05 %T |
-| 暗噪声 | 遮光下多次重复 std（`dark_noise`） | 无（shutter 关闭） | ≤ 0.0005（示例） |
-| 基线平直度 | 100%T 参考线重复性与偏离（`baseline_flatness`） | 空气 / 空白 | 重复性 ≤ 0.001（示例） |
-| 信噪比 | 稳定光源重复测量的信号 / 噪声（`signal_to_noise`） | 稳定光源 / 纯水 | 越高越好 |
-| 分辨率 | 窄发射线半高全宽（`resolution`） | 汞灯 / 氩灯 | FWHM ≤ 2 nm（1 nm 狭缝典型） |
+| 波长准确度 | 钬玻璃 / 钬氧化物标准片（特征峰 279.4 / 287.5 / 333.7 / 360.9 / 418.5 / 453.2 / 536.2 / 637.5 nm）；或已知发射线（汞 / 氩灯） | 测标准片光谱，在每个参考峰 ±window 内用抛物线细化（`find_peak_wavelength`）取实测峰位；误差 = 实测 − 标称，取 `max_abs_error_nm`（函数 `wavelength_accuracy`）。 | 误差 ≤ 0.5 nm |
+| 光度准确度 | 中性密度片 / 重铬酸钾标准溶液（已知吸光度点） | 测标准片 / 溶液光谱，在认证波长点线性插值取实测值；误差 = 实测 − 认证值，取 `max_abs_error`（函数 `photometric_accuracy`）。 | ≤ 0.002 A（或 0.3 %T，T = 透过率 Transmittance） |
+| 杂散光 | NaI / Corning 截止滤光片（在完全截止波长处，如 340 nm） | 用截止滤光片测透射谱，在滤光片标称完全吸收（≈0%T）的波长处线性插值取实测 T%，该残余透射即杂散光，取 `max_Tpct`（函数 `stray_light`）。 | ≤ 0.05 %T（T = 透过率） |
+| 暗噪声 | 无（入射光遮挡：shutter 关闭 / 暗室） | 遮光下采集 ≥2 次重复暗谱，逐波长算样本标准差（ddof=1），报告 `std_max` / `std_mean`（函数 `dark_noise`）。 | ≤ 0.0005（示例） |
+| 基线平直度 | 空气 / 空白（100%T 参考，T = 透过率） | 多次重复测 100%T 参考线，逐波长跨重复 std 得基线重复性 `repeatability_max`；若给 ideal 值再算平均基线相对 ideal 的最大偏离 `deviation_max`（函数 `baseline_flatness`）。 | 重复性 ≤ 0.001（示例） |
+| 信噪比 | 稳定光源 / 纯水（或任意已知稳定信号） | 同条件重复测 ≥10 次，在指定波长（或全波段均值）上 `SNR = 信号均值 / 重复标准差`（ddof=1）；噪声为 0 时返回 `inf`（函数 `signal_to_noise`）。 | 越高越好 |
+| 分辨率 | 汞灯 / 氩灯等窄发射线光源 | 测发射线光谱，在峰 ±window 内抛物线细化峰高，线性插值求半高全宽 FWHM（nm）（函数 `resolution`）。 | FWHM ≤ 2 nm（1 nm 狭缝典型） |
 
 #### 参考实现
 ```python
@@ -525,11 +528,26 @@ res = evaluate_instrument(
 print(res.report())     # metrics / pass_criteria / passed
 ```
 
-#### 坑与判据
+#### 注意事项
 - 波长准确度要选**足够尖锐且分离**的参考峰；峰位用抛物线细化（`find_peak_wavelength`）比直接取 argmax 更准。
 - 杂散光必须在滤光片**完全截止**的波长处测；截止不彻底会低估。
 - 暗噪声 / 基线平直度都要求**多次重复**（≥10 组），单次测量无意义。
 - 这些硬件指标是**方法 `s_x`（FOM 里的光谱噪声）的来源之一**：硬件噪声大，方法的 LOD / LOQ 必然差。
+
+#### 适用说明：光纤 / 阵列光谱仪（无机械光栅）
+本节方法对**光纤 / 阵列光谱仪（固定光栅、无机械扫描单色器，如 Ocean Optics / Avantes 类）同样适用**——
+本库所有硬件指标函数只吃"波长数组 + 光谱数组"，不假设扫描机构。差异主要在失效模式与检验频次：
+
+| 项目 | 扫描式单色器 | 光纤 / 阵列光谱仪（你的情况） | 本节做法 |
+|---|---|---|---|
+| 波长漂移主因 | 丝杠 / 齿轮机械回差 | **温度驱动**的像元↔波长标定漂移（可达数 nm） | 做**周期性波长重标定**（Hg-Ar / Ne 灯或钬 / 镨钕标准片）；在线监测更关键（`drift.py`） |
+| 分辨率 | 靠狭缝 / 步长调 | **固定**（狭缝 + 光栅 + 像元），不可调 | 用汞 / 氩灯线 FWHM 核验收货指标；别指望"开狭缝提 SNR" |
+| SNR | 取决于扫描次数 | 取决于**积分时间 + 信号平均** | 必须在**实际运行的积分时间 / 平均次数下**测 SNR / 暗噪声 |
+| 杂散光 | 双单色器压得低 | 光纤耦合 + 无双单色器，**往往更高** | 照测且**更要做**（NaI / 截止滤光片） |
+| 暗 / 读出噪声 | 光电管暗电流 | CCD / CMOS 暗电流、读出噪声（制冷与否差别大） | `dark_noise`（关快门）直接测 |
+| JJG 178 扫描条款 | 适用 | 不适用（无扫描机构） | 其余（波长 / 光度 / 杂散光 / 基线 / 噪声 / 分辨率）计算口径**完全一致** |
+
+一句话：**计算口径照搬，重心从"机械扫描机构"挪到"温度漂移标定 + 积分时间下的 SNR + 杂散光"**。
 
 #### 参考文献
 - **JJG 178《紫外、可见、近红外分光光度计》检定规程**（国内计量溯源，含波长 / 光度 / 杂散光 / 基线 / 噪声 / 分辨率检验）。
@@ -562,6 +580,26 @@ y = m.predict(np.load("new_spectra.npy"))
 ```python
 ok, diff = verify_against_card(m, card, X_test)   # 应 <= 1e-8
 ```
+
+### 独立推理脚本部署（river_inference.py，无需 aimeta）
+
+除 `edge/` 运行时外，仓库另提供脱离 aimeta 依赖树的独立推理脚本 `river_inference.py`
+（与 `requirements.txt` 一同置于仓库根目录；完整部署 SOP 见 `ai-meta-main/deploy/实际水样模型部署和测试.docx`）。它读取 ARFF 光谱、输出
+JSON 结果，支持 `--variant pca`（默认）与 `range`（原 Linux 流水线）。脚本自带全部预处理
+（Wiener → SG → 小波 → SNV），模型以 pickle/joblib 保存且已含 `MeanCenterer`/`YAutoScaler` 等 scaler，
+故**线性、随机森林、LightGBM、AdaBoost 等任意 sklearn 系模型都能直接加载预测**，不要求「仅线性模型」。
+
+工控机只需 Python 3.12 + 随脚本附带的 `requirements.txt`（joblib / numpy / scipy / scikit-learn /
+pywavelets），用 `pip install -r requirements.txt` 安装即可，无需安装 aimeta 全套。
+
+简要流程：
+
+1. 拷 `.pkl` 模型到 `<部署目录>\data\models\`（第二套模型放 `models\wider_range\`）；
+2. 拷 `river_inference.py` 与 `requirements.txt` 到 `<部署目录>\`；
+3. `conda create -n reg_venv python=3.12 && conda activate reg_venv && pip install -r requirements.txt`；
+4. 在站点 `strategy_ai???.ini` 的 `[Python]` 段设 `reg_exe = ...\reg_venv\python.exe`；
+5. 测试：`python river_inference.py -file_name SpectrumData_****.arff -re_train False`，
+   结果见 `result_****.json`。
 
 ---
 

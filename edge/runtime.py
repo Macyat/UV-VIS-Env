@@ -63,9 +63,35 @@ def _is_delegable(op: str) -> bool:
 
 
 def _apply_op(op_name: str, params: Dict[str, Any], X: np.ndarray) -> np.ndarray:
-    """调用注册算子执行（用于需要外部库的预处理，如 wavelet）。"""
+    """调用注册算子执行（用于需要外部库、且未在内置原生路径覆盖的预处理算子）。
+
+    注意：``wavelet`` 已在 ``_WAVELET_NATIVE`` 原生支持（仅依赖 PyWavelets，
+    无需安装完整 aimeta）；此处仅作其它潜在委托算子的兜底。
+    """
     from aimeta.preprocessing.operators import PREPROC
     return PREPROC.build(op_name, **params).transform(X)
+
+
+def _wavelet_denoise(x_row: np.ndarray, wavelet: str = "sym4", level: int = 2) -> np.ndarray:
+    """小波软阈值去噪（单条光谱），输出长度与输入一致。
+
+    直接依赖 PyWavelets（``pywt``），使 ``wavelet`` 算子可在**不安装完整 aimeta**
+    的工控机 / 小电脑上部署；与 ``aimeta.preprocessing.operators.wavelet_denoise``
+    数值一致（由回归测试锁定）。
+    """
+    import pywt
+    x = np.asarray(x_row, dtype=float)
+    coeff = pywt.wavedec(x, wavelet, mode="smooth", level=level)
+    sigma = np.median(np.abs(coeff[-1])) / 0.6745
+    uthresh = sigma * np.sqrt(2 * np.log(len(x)))
+    coeff[1:] = [pywt.threshold(c, value=uthresh, mode="soft") for c in coeff[1:]]
+    out = pywt.waverec(coeff, wavelet, mode="smooth")
+    n = len(x)
+    if len(out) == n:
+        return out
+    if len(out) > n:
+        return out[:n]
+    return np.pad(out, (0, n - len(out)), mode="edge")
 
 
 # ------------------------------------------------------------ Savitzky-Golay
@@ -197,7 +223,14 @@ class LinearEdgeModel:
                 A = np.vstack([ref, np.ones_like(ref)]).T
                 X = np.vstack([_msc_row(r, A) for r in X])
             elif k == "op":
-                X = _apply_op(op["op"], op.get("params", {}), X)
+                op_name = op["op"]
+                params = op.get("params", {})
+                if op_name == "wavelet":
+                    wav = str(params.get("wavelet", "sym4"))
+                    lvl = int(params.get("level", 2))
+                    X = np.vstack([_wavelet_denoise(r, wav, lvl) for r in X])
+                else:
+                    X = _apply_op(op_name, params, X)
         return X
 
     def predict(self, X: np.ndarray) -> np.ndarray:
