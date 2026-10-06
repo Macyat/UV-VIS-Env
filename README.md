@@ -226,7 +226,7 @@ export_top_k_report(cards, X_val, y_val, params["TN"], out_dir, k=3, day_idx=day
 ### 仪器间模型迁移
 
 把 A 机器上的模型用到 B 机器，避免每台设备重新训练。
-前提是一批**在两台仪器上都测过**的样本（现场可用同一套标液获得）。
+前提是一批**在两台仪器上都测过**的样本（可用同一套标液获得）。
 
 ```python
 from aimeta.transfer.standardization import (
