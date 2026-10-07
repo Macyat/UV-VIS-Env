@@ -63,7 +63,9 @@ def test_select_n_components_in_range(data):
     wl, X, y = data
     k = select_n_components(X, y, model_key="pls", folds=3)
     assert isinstance(k, int)
-    upper = min(20, X.shape[0] // 3, X.shape[1])
+    # kfold 3 折：每折训练集约 n - n//3 个样本；上限受该最小训练集约束
+    min_train = X.shape[0] - X.shape[0] // 3
+    upper = min(20, min_train, X.shape[1])
     assert 1 <= k <= upper
 
 

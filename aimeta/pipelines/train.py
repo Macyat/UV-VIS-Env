@@ -29,6 +29,7 @@ def _cv_splits(n: int, day_idx: Optional[np.ndarray], cv: str, folds: int,
     - ``logo``：按日留一（训练集 = 除该天外的所有天；含未来天，存在时序泄漏，仅作对照）。
     - ``expanding``：按日扩窗（训练集 = 该天之前的所有天，不用未来预测过去）。
     - ``rolling``：按日滚动窗（训练集 = 该天之前最近的 ``window`` 天，不用未来预测过去）。
+      前 ``window`` 天作为 warm-up 期跳过（过去天数不足 ``window`` 不产生折）。
 
     ``logo`` / ``expanding`` / ``rolling`` 需要 ``day_idx``（每样本所属的「第几天」标签）。
     """
@@ -54,7 +55,15 @@ def _cv_splits(n: int, day_idx: Optional[np.ndarray], cv: str, folds: int,
         elif cv == "rolling":
             if window is None:
                 raise ValueError("cv='rolling' 需要给定 cv_window（滚动窗口的天数）")
+            if window <= 0:
+                raise ValueError(f"cv='rolling' 的 cv_window 必须为正整数，收到 {window}。")
+            if window >= len(unique):
+                raise ValueError(
+                    f"cv='rolling' 的 cv_window={window} 天 ≥ 总天数 {len(unique)}，"
+                    "warm-up 会跳过所有天、无法产生任何训练折；请减小 cv_window。")
             past = unique[unique < d]
+            if len(past) < window:
+                continue  # warm-up 期：过去天数不足 window，跳过（不做不满窗的训练）
             win = past[-window:]
             train = np.where(np.isin(days, win))[0]
         else:
@@ -86,15 +95,16 @@ def select_n_components(
     """按 PLS_toolbox routine 为潜变量模型选择维数 n_components。
 
     对 n_components = 1..k 逐一做交叉验证（取 RMSE），返回误差最小者。
-    按日 CV（logo/expanding/rolling）时以天数计折，否则用 ``folds``。
-    k = min(max_components, n_samples // n_folds, n_features)，保证每个 CV 折的
-    训练集都放得下该维数。仅对 latent 族（pls / pcr）有意义。
+    k = min(max_components, 各折训练集最小样本数, n_features)，保证每个 CV 折的
+    训练集都放得下该维数（潜变量数不能超过该折训练样本数）。仅对 latent 族
+    （pls / pcr）有意义。
     """
     if model_meta(model_key).get("family") != "latent":
         raise ValueError(f"select_n_components 仅适用于 latent 族模型，收到 {model_key!r}")
     n, p = X.shape
-    n_folds = len(np.unique(np.asarray(day_idx))) if day_idx is not None else folds
-    k = min(max_components, max(1, n // max(1, n_folds)), p)
+    splits = _cv_splits(n, day_idx, cv, folds, seed=0, window=cv_window)
+    min_train = min(len(tr) for tr, _ in splits) if splits else n
+    k = min(max_components, max(1, min_train), p)
     base = dict(model_params or {})
     errs: List[float] = []
     for nc in range(1, k + 1):

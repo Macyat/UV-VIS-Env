@@ -3,12 +3,57 @@
   "source_rows": 437,
   "n_wavelengths": 611,
   "wavelength_range_nm": [
-    190,
-    800
+    190.0,
+    800.0
   ],
-  "wavelength_step_nm": 1,
-  "spectra_columns": "wavelength_1 .. wavelength_611",
-  "target": "TN",
-  "nan_in_TN": 9,
-  "note": "TN 缺失的 9 行需在训练前剔除（~np.isnan(tn) 掩码）。"
+  "wavelength_step_nm": 1.0,
+  "spectra_prefix": "wavelength_",
+  "nan_in_spectra": 0,
+  "labels": {
+    "columns": [
+      "TN",
+      "AN",
+      "TP",
+      "COD",
+      "CODMn",
+      "DO1",
+      "TUR1",
+      "DO2",
+      "TUR2"
+    ],
+    "shape": [
+      437,
+      9
+    ],
+    "nan_per_column": {
+      "TN": 9,
+      "AN": 1,
+      "TP": 14,
+      "COD": 437,
+      "CODMn": 0,
+      "DO1": 437,
+      "TUR1": 0,
+      "DO2": 437,
+      "TUR2": 437
+    }
+  },
+  "day_idx": {
+    "source_column": "DAY_idx",
+    "unique_days": 81,
+    "range": [
+      1,
+      81
+    ],
+    "nan": 0
+  },
+  "digested": {
+    "spectra_file": "spectra_digest.npy",
+    "wavelengths_file": "wavelengths.npy",
+    "prefix": "wavelength_digested_",
+    "shape": [
+      437,
+      611
+    ],
+    "all_nan": true
+  }
 }
