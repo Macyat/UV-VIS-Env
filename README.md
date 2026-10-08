@@ -3,11 +3,11 @@
 > English | [中文](README.zh-CN.md)
 
 An algorithm library for online UV-Vis spectroscopic water-quality monitoring. It covers the full pipeline
-from hardware evaluation, spectral preprocessing, modeling, wavelength selection, and inter-instrument model
+from hardware evaluation, analytical-method evaluation, spectral preprocessing, modeling, and inter-instrument model
 transfer to metrological acceptance and online monitoring, and can be used for laboratory research, offline
-modeling, and online deployment on industrial PCs alike.
+modeling, and online deployment.
 
-Supported water-quality parameters: CODMn, COD, TN, TP, ammonia nitrogen (AN), and turbidity (TUR).
+Water-quality parameters currently under verification: CODMn, COD, TN, TP, ammonia nitrogen (AN), and turbidity (TUR).
 
 ### Acknowledgements
 
@@ -23,7 +23,7 @@ This library is informed by the chemometrics literature; in particular, we ackno
 
 > **Terminology**: this library makes heavy use of spectrometric-metrology and Chinese-national-standard
 > terms (FOM, blank, theoretical upper, review limit, acceptance rate, daily R², etc.). Before reading the code or
-> configuration, please skim [`docs/术语表.md`](docs/术语表.md) to avoid mixing up definitions.
+> configuration, please skim [`docs/glossary.md`](docs/glossary.md) to avoid mixing up definitions.
 
 ---
 
@@ -760,7 +760,7 @@ After export, verify consistency once:
 ok, diff = verify_against_card(m, card, X_test)   # should be <= 1e-8
 ```
 
-### Standalone Inference-Script Deployment (river_inference.py, no aimeta)
+### Standalone Inference-Script Deployment (river_inference.py)
 
 Besides the `edge/` runtime, the repo provides `river_inference.py`, a standalone inference script independent of the
 aimeta dependency tree (placed in the repo root together with `requirements.txt`; full deployment SOPs are in

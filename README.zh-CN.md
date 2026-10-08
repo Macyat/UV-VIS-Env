@@ -2,10 +2,10 @@
 
 > [English](README.md) | 中文
 
-UV-Vis 光谱水质在线监测算法库。覆盖从硬件评价、光谱预处理、建模、波长选择、仪器间模型迁移，
-到计量验收与在线监控的完整链路，可同时用于实验室研究、离线建模与工控机在线部署。
+UV-Vis 光谱水质在线监测算法库。覆盖从硬件评价、分析方法评价，光谱预处理、建模、仪器间模型迁移，
+到计量验收与在线监控的完整链路，可同时用于实验室研究、离线建模与在线部署。
 
-支持的水质参数：CODMn、COD、TN、TP、氨氮（AN）、浊度（TUR）。
+目前受检验的水质参数：CODMn、COD、TN、TP、氨氮（AN）、浊度（TUR）。
 
 ### 致敬
 
@@ -713,7 +713,7 @@ y = m.predict(np.load("new_spectra.npy"))
 ok, diff = verify_against_card(m, card, X_test)   # 应 <= 1e-8
 ```
 
-### 独立推理脚本部署（river_inference.py，无需 aimeta）
+### 独立推理脚本部署（river_inference.py）
 
 除 `edge/` 运行时外，仓库另提供脱离 aimeta 依赖树的独立推理脚本 `river_inference.py`
 （与 `requirements.txt` 一同置于仓库根目录；完整部署 SOP 见 `deploy/实际水样模型部署和测试.docx` 与 `deploy/标液模型部署和测试.docx`）。它读取 ARFF 光谱、输出
