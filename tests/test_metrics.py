@@ -75,7 +75,7 @@ def test_weaker_signal_gives_worse_lod():
 
 def test_classify_and_confusion():
     p = WaterParam(name="TN", ranges=[0.2, 0.5, 1.0, 1.5, 2.0],
-                   lower_bound=0.0, upper_bound=15.0)
+                   lower_bound=0.0, review_upper=15.0)
     assert list(classify([0.1, 0.3, 1.2, 3.0], p)) == [0, 1, 3, 5]
     M = misclassification_matrix([0.1, 0.3, 1.2], [0.1, 0.6, 1.2], p)
     assert M.shape == (p.n_classes, p.n_classes)
@@ -84,7 +84,7 @@ def test_classify_and_confusion():
 
 def test_acceptance_rate_penalises_cross_class_errors():
     p = WaterParam(name="AN", ranges=[0.15, 0.5, 1.0, 1.5, 2.0],
-                   lower_bound=0.0, upper_bound=3.0, abs_error_bound=0.2)
+                   lower_bound=0.0, review_upper=3.0, abs_error_bound=0.2)
     good = acceptance_rate(np.array([0.1, 1.0, 2.5]),
                            np.array([0.11, 1.05, 2.4]), p)
     bad = acceptance_rate(np.array([0.1, 1.0, 2.5]),
@@ -109,31 +109,31 @@ def test_params_yaml_loads_all_parameters():
         assert k in params and len(params[k].ranges) >= 3
 
 
-def test_dead_bound_defaults_and_override():
-    """有效死限 = min(设备死限, 河流死限)；手动覆盖优先于训练自动值。"""
+def test_theoretical_upper_defaults_and_override():
+    """有效理论上限 = min(设备理论上限, 河流理论上限)；手动覆盖优先于训练自动值。"""
     p = WaterParam(name="TN", ranges=[0.2, 0.5, 1, 1.5, 2],
-                   lower_bound=0.05, upper_bound=3)
-    assert p.dead_bound(None) == 4.0        # 仅河流维 = 2×V类
-    assert p.dead_bound(3.0) == 3.0         # min(设备3, 河流4)
-    assert p.dead_bound(10.0) == 4.0        # min(设备10, 河流4)
+                   lower_bound=0.05, review_upper=3)
+    assert p.theoretical_upper(None) == 4.0        # 仅河流维 = 2×V类
+    assert p.theoretical_upper(3.0) == 3.0         # min(设备3, 河流4)
+    assert p.theoretical_upper(10.0) == 4.0        # min(设备10, 河流4)
     # 手动覆盖：取 min，且忽略训练自动值
     p2 = WaterParam(name="TN", ranges=[0.2, 0.5, 1, 1.5, 2],
-                    lower_bound=0.05, upper_bound=3,
-                    device_dead_bound=5.0, river_dead_bound=2.0)
-    assert p2.dead_bound(None) == 2.0
-    assert p2.dead_bound(100.0) == 2.0      # 手动优先于 auto
+                    lower_bound=0.05, review_upper=3,
+                    device_theoretical_upper=5.0, river_theoretical_upper=2.0)
+    assert p2.theoretical_upper(None) == 2.0
+    assert p2.theoretical_upper(100.0) == 2.0      # 手动优先于 auto
 
 
-def test_params_yaml_exposes_dead_bounds():
+def test_params_yaml_exposes_theoretical_uppers():
     params = load_params()
     for k in ["CODMn", "COD", "TN", "TP", "AN", "TUR"]:
         p = params[k]
         if k == "TN":
-            # 总氮特殊：河流死限暂定 10，覆盖默认 2×V类=4
-            assert p.dead_bound(1e9) == 10
+            # 总氮特殊：河流理论上限暂定 10，覆盖默认 2×V类=4
+            assert p.theoretical_upper(1e9) == 10
         else:
-            # 默认未手填 -> 河流死限 = 2 × 最差类别界（设备未初始化时为 None）
-            assert p.dead_bound(1e9) == 2.0 * max(p.ranges)
+            # 默认未手填 -> 河流理论上限 = 2 × 最差类别界（设备未初始化时为 None）
+            assert p.theoretical_upper(1e9) == 2.0 * max(p.ranges)
 
 
 def test_acceptance_report_runs_for_turbidity():

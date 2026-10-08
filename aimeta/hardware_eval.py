@@ -32,6 +32,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
+from scipy.signal import savgol_filter
 
 # 钬玻璃 / 钬氧化物典型特征峰（nm），用于波长准确度检验
 DEFAULT_HOLMIUM_PEAKS = (279.4, 287.5, 333.7, 360.9, 418.5, 453.2, 536.2, 637.5)
@@ -206,6 +207,66 @@ def resolution(wavelengths: np.ndarray, line_spectrum: np.ndarray,
                              (half - seg[k]) / (seg[k + 1] - seg[k] + 1e-12))
             break
     return float(right - left)
+
+
+def standard_solution_linearity(
+    X: np.ndarray,
+    concentrations: np.ndarray,
+    sg_window: int = 15,
+    sg_order: int = 3,
+    min_points: int = 2,
+) -> Dict[str, np.ndarray]:
+    """标液线性度（各波长）：逐波长、按浓度梯度逐步累加做线性回归的 R²。
+
+    对应「标液线性度」检验项：自第 ``min_points`` 个浓度起，对每个波长用前 k 个
+    浓度点做线性回归（吸光度 → 浓度），输出累计 R²。R² 越接近 1 且随浓度增加保持
+    不降，说明该波长在此吸光度范围的线性（Beer-Lambert）越好——用于定性判定各波长
+    的线性范围。
+
+    Args:
+        X: (n_conc, p) 标液光谱矩阵，行 = 浓度梯度（建议升序），列 = 波长。
+        concentrations: (n_conc,) 浓度值，与 X 行一一对应。
+        sg_window: SG 平滑窗宽（默认 15，须为奇数，会自适应到不超过波长数）。
+        sg_order: SG 平滑阶数（默认 3）。
+        min_points: 至少用几个点开始拟合（默认 2）。
+
+    Returns:
+        dict:
+            ``X_smooth``: (n_conc, p) 平滑后的光谱；
+            ``r2``: (n_conc, p) 累计 R²，``r2[k-1, j]`` = 用前 k 个浓度拟合波长 j 的
+                    R²；``r2[0, j]`` 为 NaN（不足 min_points 个点）；
+            ``concentrations``: (n_conc,)。
+    """
+    X = np.asarray(X, dtype=np.float64)
+    C = np.asarray(concentrations, dtype=np.float64).ravel()
+    if X.ndim != 2:
+        raise ValueError("X 必须是 (n_conc, p) 二维矩阵")
+    if X.shape[0] != len(C):
+        raise ValueError("X 的行数必须等于浓度点数")
+    n, p = X.shape
+    if n < min_points + 1:
+        raise ValueError(f"浓度点数 {n} 不足，至少需 {min_points + 1} 个点")
+
+    # 逐条光谱 SG 平滑（沿波长轴），窗宽自适应到不超过波长数
+    window = int(min(sg_window, p))
+    if window % 2 == 0:
+        window -= 1
+    if window > sg_order:
+        Xs = savgol_filter(X, window_length=window, polyorder=sg_order, axis=1)
+    else:
+        Xs = X.copy()
+
+    r2 = np.full((n, p), np.nan)
+    for k in range(min_points, n + 1):          # k = 用前 k 个浓度点
+        Ck = C[:k]
+        Xk = Xs[:k, :]
+        for j in range(p):
+            slope, intercept = np.polyfit(Xk[:, j], Ck, 1)
+            yhat = slope * Xk[:, j] + intercept
+            ss_res = float(np.sum((Ck - yhat) ** 2))
+            ss_tot = float(np.sum((Ck - Ck.mean()) ** 2))
+            r2[k - 1, j] = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    return {"X_smooth": Xs, "r2": r2, "concentrations": C}
 
 
 @dataclass

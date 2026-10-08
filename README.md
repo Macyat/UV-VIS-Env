@@ -10,7 +10,7 @@ modeling, and online deployment on industrial PCs alike.
 Supported water-quality parameters: CODMn, COD, TN, TP, ammonia nitrogen (AN), and turbidity (TUR).
 
 > **Terminology**: this library makes heavy use of spectrometric-metrology and Chinese-national-standard
-> terms (FOM, blank, dead bound, review limit, acceptance rate, daily R², etc.). Before reading the code or
+> terms (FOM, blank, theoretical upper, review limit, acceptance rate, daily R², etc.). Before reading the code or
 > configuration, please skim [`docs/术语表.md`](docs/术语表.md) to avoid mixing up definitions.
 > Quality evaluation has two layers — **analytical-method figures of merit (FOM)** and **spectrometer hardware
 > evaluation**; see the section "Quality Evaluation: Analytical Method and Instrument Hardware".
@@ -49,9 +49,7 @@ from aimeta.pipelines.infer import predict
 X = np.load("Data/Example1/spectra.npy")        # (n_samples, n_wavelengths)
 wl = np.load("Data/Example1/wavelengths.npy")   # (n_wavelengths,) = 190..800 nm
 lab = np.load("Data/Example1/labels.npy")       # (n_samples, 9) columns [TN, AN, TP, COD, CODMn, DO1, TUR1, DO2, TUR2]
-tn = lab[:, 0]                                  # TN is in column 0 of labels
-mask = ~np.isnan(tn)                            # drop the 9 samples with missing reference values
-X, tn = X[mask], tn[mask]
+tn = lab[:, 0]                                  # TN is in column 0 of labels; NaN rows are dropped inside train_model
 spectra = SpectrumSet(X=X, wavelengths=wl, y=tn)
 
 # 2. Load parameter definitions and preprocessing chain (configs/)
@@ -106,9 +104,7 @@ wl = np.load("Data/Example1/wavelengths.npy")   # (611,)
 lab = np.load("Data/Example1/labels.npy")       # (437, 9) columns [TN, AN, TP, COD, CODMn, DO1, TUR1, DO2, TUR2]
 day = np.load("Data/Example1/day_idx.npy")      # (437,) sampling day (1..81)
 
-codmn = lab[:, 4]                               # CODMn is in column 4, no missing values
-mask = ~np.isnan(codmn)                         # drop samples missing CODMn; none in this example
-X, codmn, day = X[mask], codmn[mask], day[mask]
+codmn = lab[:, 4]                               # CODMn is in column 4 (no missing values)
 
 spectra = SpectrumSet(X=X, wavelengths=wl, y=codmn)
 
@@ -132,7 +128,7 @@ print(card)                # card.fom["rmse_cv"] is the rolling-CV prediction RM
 - `cv="expanding"` trains on all days before the current day; `cv="rolling"` uses only the most recent
   `cv_window` days, which better captures recent matrix changes.
 - To switch parameters (e.g. TN), just change `label=` and `param_def=params["TN"]`, and replace `lab[:, 4]`
-  with the corresponding column plus a missing-value mask (TN has 9 missing rows).
+  with the corresponding column (missing values are dropped automatically inside `train_model`).
 
 ---
 

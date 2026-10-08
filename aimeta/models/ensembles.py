@@ -69,7 +69,7 @@ def fuse_predict(
         from ..metrics.water_standards import apply_bounds
         fused, *_ = apply_bounds(
             fused, getattr(param, "lower_bound", None),
-            getattr(param, "upper_bound", None), None)
+            getattr(param, "review_upper", None), None)
 
     info: Dict[str, object] = {
         "scheme": used,

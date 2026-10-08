@@ -16,52 +16,52 @@ class WaterParam:
     """一个水质参数的计量定义。
 
     两道上限（见 ``apply_bounds``）：
-        - ``upper_bound`` 复核限：超过仍显示，但打 ``above_upper`` 标，交由人工 /
+        - ``review_upper`` 复核限：超过仍显示，但标记 ``above_review``，交由人工 /
           金标准确认（可能是真实污染，也可能是模型外推错误）。
-        - 死限：物理上不可能测得的值，不显示（``not_display``）。有效死限
-          ``min(设备死限, 河流死限)``，二者任一可手动覆盖默认。
+        - 理论上限：物理上不可能测得的值，不显示（``not_display``）。有效理论上限
+          ``min(设备理论上限, 河流理论上限)``，二者任一可手动覆盖默认。
     """
 
     name: str
     ranges: List[float]          # 类别分界（GB3838 I/II/III/IV/V）
     lower_bound: float           # 检出限
-    upper_bound: float           # 复核限（量程上限）
+    review_upper: float           # 复核限（量程上限）
     abs_error_bound: float = 0.0  # 低浓度允许绝对误差
     mape_bound: float = 0.15      # 高浓度允许相对误差
     unit: str = "mg/L"
     standard: str = ""            # 检出限的依据标准（溯源用）
-    device_dead_bound: Optional[float] = None  # 设备死限手动覆盖（默认 2× 最高校准标样）
-    river_dead_bound: Optional[float] = None   # 河流死限手动覆盖（默认 2× 最差类别界）
+    device_theoretical_upper: Optional[float] = None  # 设备理论上限手动覆盖（默认 2× 最高校准标样）
+    river_theoretical_upper: Optional[float] = None   # 河流理论上限手动覆盖（默认 2× 最差类别界）
 
     @classmethod
     def from_dict(cls, name: str, d: Dict) -> "WaterParam":
         return cls(name=name, **{k: v for k, v in d.items()
-                                 if k in {"ranges", "lower_bound", "upper_bound",
+                                 if k in {"ranges", "lower_bound", "review_upper",
                                           "abs_error_bound", "mape_bound", "unit",
-                                          "standard", "device_dead_bound",
-                                          "river_dead_bound"}})
+                                          "standard", "device_theoretical_upper",
+                                          "river_theoretical_upper"}})
 
     @property
     def n_classes(self) -> int:
         return len(self.ranges) + 1
 
     @property
-    def river_dead_default(self) -> Optional[float]:
-        """河流死限默认 = 2 × 最差类别界（2 × V类）。无 ranges 时为 None。"""
+    def river_theoretical_upper_default(self) -> Optional[float]:
+        """河流理论上限默认 = 2 × 最差类别界（2 × V类）。无 ranges 时为 None。"""
         return 2.0 * float(max(self.ranges)) if self.ranges else None
 
-    def dead_bound(self, auto_device_dead: Optional[float] = None) -> Optional[float]:
-        """有效死限 = min(设备死限, 河流死限)。
+    def theoretical_upper(self, auto_device_theoretical_upper: Optional[float] = None) -> Optional[float]:
+        """有效理论上限 = min(设备理论上限, 河流理论上限)。
 
-        设备死限：手动 ``device_dead_bound``，否则训练时算出的
-        ``auto_device_dead``（= 2 × 最高校准标样浓度）。
-        河流死限：手动 ``river_dead_bound``，否则 ``river_dead_default``（2 × V类）。
-        二者取较小值；若都缺则返回 None（不启用死限）。
+        设备理论上限：手动 ``device_theoretical_upper``，否则训练时算出的
+        ``auto_device_theoretical_upper``（= 2 × 最高校准标样浓度）。
+        河流理论上限：手动 ``river_theoretical_upper``，否则 ``river_theoretical_upper_default``（2 × V类）。
+        二者取较小值；若都缺则返回 None（不启用理论上限）。
         """
-        device = self.device_dead_bound if self.device_dead_bound is not None \
-            else auto_device_dead
-        river = self.river_dead_bound if self.river_dead_bound is not None \
-            else self.river_dead_default
+        device = self.device_theoretical_upper if self.device_theoretical_upper is not None \
+            else auto_device_theoretical_upper
+        river = self.river_theoretical_upper if self.river_theoretical_upper is not None \
+            else self.river_theoretical_upper_default
         vals = [v for v in (device, river) if v is not None]
         return float(min(vals)) if vals else None
 
@@ -72,34 +72,34 @@ def classify(values: np.ndarray, param: WaterParam) -> np.ndarray:
     return np.searchsorted(np.asarray(param.ranges, dtype=np.float64), v, side="right")
 
 
-def apply_bounds(pred: np.ndarray, lo: Optional[float], hi: Optional[float],
-                 dead: Optional[float] = None):
-    """按检出限 / 复核限 / 死限处理预测值，并返回标记（三区）。
+def apply_bounds(pred: np.ndarray, lo: Optional[float], review: Optional[float],
+                 theo_upper: Optional[float] = None):
+    """按检出限 / 复核限 / 理论上限处理预测值，并返回标记（三区）。
 
     规则：
-        - 低于检出限 (lo)：替换为 ``lo / 2``，并打 ``below_lod`` 标
-        - 复核区 ``(lo, hi]``：正常显示，无标
-        - 复核区 ``(hi, dead]``：保留原值（**不夹断**），打 ``above_upper`` 标，
+        - 低于检出限 (lo)：替换为 ``lo / 2``，并标记 ``below_lod``
+        - 复核区 ``(lo, review]``：正常显示，无标
+        - 复核区 ``(review, theo_upper]``：保留原值（**不夹断**），标记 ``above_review``，
           表示"超出量程，需人工 / 金标准复核"
-        - 死区 ``(dead, +∞)``：物理上不可能测得，置 NaN（不显示），打
-          ``not_display`` 标
-        - lo / hi / dead 为 None 时对应项不处理
+        - 超理论上限 ``(theo_upper, +∞)``：物理上不可能测得，置 NaN（不显示），
+          标记 ``not_display``
+        - lo / review / theo_upper 为 None 时对应项不处理
 
     Returns:
-        (pred_out, below_lod_mask, above_upper_mask, not_display_mask)
+        (pred_out, below_lod_mask, above_review_mask, not_display_mask)
     """
     pred = np.asarray(pred, dtype=np.float64).ravel()
     below = (pred < lo) if lo is not None else np.zeros(pred.shape, dtype=bool)
-    above = (pred > hi) if hi is not None else np.zeros(pred.shape, dtype=bool)
-    dead_mask = (pred > dead) if dead is not None else np.zeros(pred.shape, dtype=bool)
-    # 死区以上不再算复核区（已被抑制）
-    above = above & ~dead_mask
+    above = (pred > review) if review is not None else np.zeros(pred.shape, dtype=bool)
+    over_mask = (pred > theo_upper) if theo_upper is not None else np.zeros(pred.shape, dtype=bool)
+    # 超理论上限以上不再算复核区（已被抑制）
+    above = above & ~over_mask
     out = pred.copy()
     if lo is not None:
         out = np.where(below, lo / 2.0, out)
-    if dead is not None:
-        out = np.where(dead_mask, np.nan, out)
-    return out, below, above, dead_mask
+    if theo_upper is not None:
+        out = np.where(over_mask, np.nan, out)
+    return out, below, above, over_mask
 
 
 def misclassification_matrix(y_true: np.ndarray, y_pred: np.ndarray,
@@ -205,6 +205,6 @@ def acceptance_report(y_true: np.ndarray, y_pred: np.ndarray, param: WaterParam,
     rep["mape"] = float(np.nanmean(mape))
     if day_idx is not None:
         rep["daily_r2"] = daily_r2(day_idx, yt, yp)
-    if param.upper_bound:
+    if param.review_upper:
         rep["alarm"] = alarm_accuracy(yt, yp, param.ranges[-1])
     return rep

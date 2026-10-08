@@ -130,27 +130,27 @@ def test_guard_bounds_and_flags(data):
     lo = params["AN"].lower_bound
     # 低于检出限替为 LOD/2，不会低于 LOD/2
     assert out["prediction"].min() >= lo / 2.0 - 1e-12
-    # 超过死限的预测被置 NaN 不显示
+    # 超过理论上限的预测被置 NaN 不显示
     assert np.all(np.isnan(out["prediction"][out["not_display"]]))
     # 旗标齐全且为布尔
-    for key in ("below_lod", "above_upper", "not_display"):
+    for key in ("below_lod", "above_review", "not_display"):
         assert key in out and out[key].dtype == bool
 
 
 def test_apply_bounds_substitutes_lod_half():
     from aimeta.metrics.water_standards import apply_bounds
     pred = np.array([-1.0, 0.0, 0.03, 2.0, 3.5, 100.0])
-    lo, hi, dead = 0.025, 3.0, 4.0
-    out, below, review, suppress = apply_bounds(pred, lo, hi, dead)
+    lo, review_upper, theo_upper = 0.025, 3.0, 4.0
+    out, below, review, suppress = apply_bounds(pred, lo, review_upper, theo_upper)
     # 低于检出限 -> LOD/2
     assert out[0] == lo / 2.0 and out[1] == lo / 2.0
     assert below[0] and below[1] and not below[2]
     # 正常区不变
     assert out[2] == 0.03 and out[3] == 2.0
     assert not review[2] and not review[3]
-    # 复核区 (hi, dead]：保留原值并打"需复核"标（不夹断）
+    # 复核区 (review_upper, theo_upper]：保留原值并标记"需复核"（不夹断）
     assert out[4] == 3.5 and review[4] and not suppress[4]
-    # 死区 > dead：置 NaN 不显示，打 not_display，且不算复核区
+    # 超理论上限 > theo_upper：置 NaN 不显示，标记 not_display，且不算复核区
     assert np.isnan(out[5]) and suppress[5] and not review[5]
     # 无边界时不处理
     out2, b2, a2, s2 = apply_bounds(pred, None, None, None)

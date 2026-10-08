@@ -7,7 +7,7 @@ UV-Vis 光谱水质在线监测算法库。覆盖从硬件评价、光谱预处�
 
 支持的水质参数：CODMn、COD、TN、TP、氨氮（AN）、浊度（TUR）。
 
-> **术语约定**：本库大量使用光谱计量与国标专有名词（FOM、空白、死限、复核限、达标率、日级 R² 等）。
+> **术语约定**：本库大量使用光谱计量与国标专有名词（FOM、空白、理论上限、复核限、达标率、日级 R² 等）。
 > 阅读代码或配置前，请先浏览 [`docs/术语表.md`](docs/术语表.md)，避免口径混淆。
 > 质量评价分为两层——**分析方法品质因数（FOM）**与**光谱仪硬件评价**，详见「质量评价：分析方法与仪器硬件」一节。
 
@@ -45,9 +45,7 @@ from aimeta.pipelines.infer import predict
 X = np.load("Data/Example1/spectra.npy")        # (n_samples, n_wavelengths)
 wl = np.load("Data/Example1/wavelengths.npy")   # (n_wavelengths,) = 190..800 nm
 lab = np.load("Data/Example1/labels.npy")       # (n_samples, 9) 列序 [TN, AN, TP, COD, CODMn, DO1, TUR1, DO2, TUR2]
-tn = lab[:, 0]                                  # TN 在 labels 第 0 列
-mask = ~np.isnan(tn)                            # 剔除参考值缺失的 9 个样本
-X, tn = X[mask], tn[mask]
+tn = lab[:, 0]                                  # TN 在 labels 第 0 列（NaN 行由 train_model 内部自动剔除）
 spectra = SpectrumSet(X=X, wavelengths=wl, y=tn)
 
 # 2. 取参数定义与预处理链（configs/）
@@ -96,9 +94,7 @@ wl = np.load("Data/Example1/wavelengths.npy")   # (611,)
 lab = np.load("Data/Example1/labels.npy")       # (437, 9) 列序 [TN, AN, TP, COD, CODMn, DO1, TUR1, DO2, TUR2]
 day = np.load("Data/Example1/day_idx.npy")      # (437,) 采样日（1..81）
 
-codmn = lab[:, 4]                               # CODMn 在第 4 列，无缺失
-mask = ~np.isnan(codmn)                         # 缺 CODMn 的样本须剔除；本例无缺失
-X, codmn, day = X[mask], codmn[mask], day[mask]
+codmn = lab[:, 4]                               # CODMn 在第 4 列（无缺失）
 
 spectra = SpectrumSet(X=X, wavelengths=wl, y=codmn)
 
@@ -122,7 +118,7 @@ print(card)                # card.fom["rmse_cv"] 即 rolling CV 的预测 RMSE
 - `cv="expanding"` 用「该天之前的所有天」扩窗训练；`cv="rolling"` 只用最近 `cv_window` 天，
   更能捕捉近期基体变化。
 - 若换参数（如 TN），只需改 `label=`、`param_def=params["TN"]`，并把 `lab[:, 4]` 换成
-  对应列并做缺失掩码（TN 缺 9 行）。
+  对应列即可（缺失值由 `train_model` 内部自动剔除）。
 
 ---
 

@@ -185,8 +185,8 @@ class LinearEdgeModel:
         fingerprint: str = "",
         label: str = "",
         lower_bound: Optional[float] = None,
-        upper_bound: Optional[float] = None,
-        dead_bound: Optional[float] = None,
+        review_upper: Optional[float] = None,
+        theoretical_upper: Optional[float] = None,
     ) -> None:
         self.ops = ops
         self.coef = np.asarray(coef, dtype=np.float64).ravel()
@@ -195,8 +195,8 @@ class LinearEdgeModel:
         self.fingerprint = fingerprint
         self.label = label
         self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
-        self.dead_bound = dead_bound
+        self.review_upper = review_upper
+        self.theoretical_upper = theoretical_upper
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         X = np.asarray(X, dtype=np.float64)
@@ -239,9 +239,9 @@ class LinearEdgeModel:
         if self.lower_bound is not None:
             below = y < self.lower_bound
             y = np.where(below, self.lower_bound / 2.0, y)   # 未检出替为 LOD/2
-        # 复核区 (upper, dead]：保留原值（交给人工复核），不夹断
-        if self.dead_bound is not None:
-            y = np.where(y > self.dead_bound, np.nan, y)      # 死区不显示
+        # 复核区 (upper, theo_upper]：保留原值（交给人工复核），不夹断
+        if self.theoretical_upper is not None:
+            y = np.where(y > self.theoretical_upper, np.nan, y)      # 超理论上限不显示
         return y
 
     # ---- 序列化 ----
@@ -277,8 +277,8 @@ class LinearEdgeModel:
             "fingerprint": self.fingerprint,
             "intercept": self.intercept,
             "lower_bound": self.lower_bound,
-            "upper_bound": self.upper_bound,
-            "dead_bound": self.dead_bound,
+            "review_upper": self.review_upper,
+            "theoretical_upper": self.theoretical_upper,
             "ops": ops_meta,
             "version": 1,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -308,8 +308,8 @@ class LinearEdgeModel:
             ops=ops, coef=z["coef"], intercept=mf["intercept"],
             wavelengths=z["wavelengths"], fingerprint=mf["fingerprint"],
             label=mf["label"], lower_bound=mf["lower_bound"],
-            upper_bound=mf["upper_bound"],
-            dead_bound=mf.get("dead_bound", None),
+            review_upper=mf["review_upper"],
+            theoretical_upper=mf.get("theoretical_upper", None),
         )
 
 
@@ -360,8 +360,8 @@ def export_card(card, model_dir: str | Path,
         wavelengths=np.asarray(card.wavelengths, dtype=np.float64),
         fingerprint=card.fingerprint(), label=card.label,
         lower_bound=getattr(wm, "lower_bound", None),
-        upper_bound=getattr(wm, "upper_bound", None),
-        dead_bound=getattr(wm, "dead_bound", None),
+        review_upper=getattr(wm, "review_upper", None),
+        theoretical_upper=getattr(wm, "theoretical_upper", None),
     )
     return m.save(model_dir)
 
@@ -370,7 +370,7 @@ def verify_against_card(edge_model: LinearEdgeModel, card, X: np.ndarray,
                         atol: float = 1e-8) -> Tuple[bool, float]:
     """train/serve 一致性校验：edge 预测 vs 训练端预测应逐元素一致。
 
-    死区内的预测在两端都是 NaN，按"相等"处理，故只比较两端都有限的样本。
+    超理论上限内的预测在两端都是 NaN，按"相等"处理，故只比较两端都有限的样本。
     """
     from aimeta.pipelines.infer import predict
     a = predict(card, X)

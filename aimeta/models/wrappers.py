@@ -15,21 +15,21 @@ from ..metrics.water_standards import apply_bounds
 class WaterQualityModel:
     """包装任意估计器：X 中心化 → 估计器 → y 反标准化 → 检出限/量程上限处理。
 
-    低于检出限的预测值替换为 lower_bound / 2，高于量程上限的夹到 upper_bound。
+    低于检出限的预测值替换为 lower_bound / 2，高于量程上限的夹到 review_upper。
 
     Args:
         estimator: 任何实现了 fit/predict 的对象
         lower_bound: 预测下限（通常是检出限）
-        upper_bound: 预测上限（量程上限）
+        review_upper: 预测上限（量程上限）
     """
 
     def __init__(self, estimator, lower_bound: Optional[float] = None,
-                 upper_bound: Optional[float] = None,
-                 dead_bound: Optional[float] = None):
+                 review_upper: Optional[float] = None,
+                 theoretical_upper: Optional[float] = None):
         self.estimator = estimator
         self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
-        self.dead_bound = dead_bound
+        self.review_upper = review_upper
+        self.theoretical_upper = theoretical_upper
         self.x_mean_: Optional[np.ndarray] = None
         self.y_mean_: float = 0.0
         self.y_scale_: float = 1.0
@@ -52,8 +52,8 @@ class WaterQualityModel:
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         pred = self.predict_raw(X)
-        out, *_ = apply_bounds(pred, self.lower_bound, self.upper_bound,
-                               self.dead_bound)
+        out, *_ = apply_bounds(pred, self.lower_bound, self.review_upper,
+                               self.theoretical_upper)
         return out
 
     # ---- 供 edge 导出 ----

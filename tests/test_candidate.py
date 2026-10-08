@@ -37,7 +37,7 @@ def synth():
     day_idx = (np.arange(n) // 12)  # ~10 天
     param = WaterParam(
         name="TEST", ranges=[0.1, 0.3, 0.5, 1.0, 2.0], lower_bound=0.02,
-        upper_bound=3.0, mape_bound=0.15,
+        review_upper=3.0, mape_bound=0.15,
     )
     return wl, X, y, day_idx, param
 

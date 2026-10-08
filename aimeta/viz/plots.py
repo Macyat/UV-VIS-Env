@@ -149,3 +149,35 @@ def plot_control_chart(values, limits=None, alarms=None, ax=None,
         ax.scatter(np.where(a)[0], v[a], color=COLORS["bad"], s=28, zorder=5)
     ax.set_xlabel("序号"); ax.set_title(title)
     return fig or ax.figure
+
+
+# ------------------------------------------------------------ 线性度
+def plot_linearity_r2(X_smooth, r2, start_idx: int = 2, ax=None,
+                      alpha: float = 0.5, title: str = "标液线性度"):
+    """吸光度 vs 累计 R² 散点图：定性判断各波长的线性范围。
+
+    输入 ``standard_solution_linearity`` 的返回：对第 ``start_idx`` 个浓度点之后，
+    把每个波长点的吸光度与其累计 R² 配对画散点。R² 高的点集中在某吸光度区间，
+    即该区间的 Beer-Lambert 线性好。
+
+    Args:
+        X_smooth: (n, p) 平滑光谱
+        r2: (n, p) 累计 R²
+        start_idx: 从第几个浓度点开始（默认 2，跳过前 2 个，对应原 MATLAB 从第 3 个起）
+        alpha: 散点透明度
+        title: 标题
+    """
+    fig = None
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6.5, 4.6))
+    Xs = np.asarray(X_smooth, dtype=np.float64)
+    R = np.asarray(r2, dtype=np.float64)
+    n, _ = Xs.shape
+    ODs, Rs = [], []
+    for i in range(start_idx, n):
+        ODs.extend(Xs[i, :].tolist())
+        Rs.extend(R[i, :].tolist())
+    ax.scatter(ODs, Rs, s=12, alpha=alpha, color=COLORS["primary"])
+    ax.set_xlabel("吸光度"); ax.set_ylabel("R²")
+    ax.set_title(title)
+    return fig or ax.figure

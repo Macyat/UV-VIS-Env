@@ -31,7 +31,7 @@ class ModelCard:
     data_version: str = "unknown"         # 训练数据版本 / 哈希
     fom: Dict[str, float] = field(default_factory=dict)   # 指标
     params: Dict[str, Any] = field(default_factory=dict)  # 模型超参
-    dead_bound: Optional[float] = None   # 有效死限 = min(设备死限, 河流死限)
+    theoretical_upper: Optional[float] = None   # 有效理论上限 = min(设备理论上限, 河流理论上限)
     created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%S"))
     version: int = CARD_VERSION
 

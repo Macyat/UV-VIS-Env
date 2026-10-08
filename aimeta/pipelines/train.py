@@ -129,6 +129,9 @@ def train_model(
 ) -> ModelCard:
     """训练单个「参数 × 模型」，返回 ModelCard。
 
+    标签（``spectra.y``）中为 NaN 的样本会自动剔除（对应的光谱行与 ``day_idx`` 同步剔除），
+    外层无需再手动做掩码。
+
     Args:
         spectra: 含 y 的光谱集（y 为单目标，是现场水样的化学法参考值）
         label:   水质参数名
@@ -143,46 +146,57 @@ def train_model(
                  expanding / rolling 只用过去的天，不用未来预测过去
         cv_window: 滚动窗口天数（仅 cv='rolling' 时需要）
         calibration_upper: 该校准标样的最高浓度（由专门的标样初始化流程给出）。
-            给出时设备死限 = 2 × calibration_upper；不给出则设备死限不启用，
-            仅用河流死限（param_def 的河流死限或默认 2 × V类）。注意：现场
-            参考值 y 不是校准标样，绝不能拿它的 max 当设备死限。
+            给出时设备理论上限 = 2 × calibration_upper；不给出则设备理论上限不启用，
+            仅用河流理论上限（param_def 的河流理论上限或默认 2 × V类）。注意：现场
+            参考值 y 不是校准标样，绝不能拿它的 max 当设备理论上限。
     """
     if spectra.y is None:
         raise ValueError("spectra.y is required for training")
     y = np.asarray(spectra.y, dtype=np.float64).ravel()
+    X_raw = np.asarray(spectra.X, dtype=np.float64)
+    day = np.asarray(day_idx).ravel() if day_idx is not None else None
+
+    # 自动剔除标签缺失（NaN）的样本，外层无需再手动做掩码；
+    # 对应的光谱行与采样日一并剔除，保持对齐。
+    mask = ~np.isnan(y)
+    if not mask.all():
+        y = y[mask]
+        X_raw = X_raw[mask]
+        if day is not None:
+            day = day[mask]
 
     chain_cfg = list(chain) if chain is not None else []
     pipe = Pipeline.from_config(chain_cfg)
-    X = pipe.fit_transform(spectra.X, y)
+    X = pipe.fit_transform(X_raw, y)
 
-    # 设备死限来自校准标样的最高浓度，由专门的标样初始化流程给出，
+    # 设备理论上限来自校准标样的最高浓度，由专门的标样初始化流程给出，
     # 不是训练用的现场参考值 y（y 是河水样的化学法结果，不是标样）。
-    # 未跑标样初始化（calibration_upper 为 None）时设备死限不启用，
-    # 仅用河流死限（见 WaterParam.dead_bound）。也可在 params.yaml 用
-    # device_dead_bound 手动覆盖。
-    auto_device_dead = 2.0 * float(calibration_upper) if calibration_upper is not None else None
+    # 未跑标样初始化（calibration_upper 为 None）时设备理论上限不启用，
+    # 仅用河流理论上限（见 WaterParam.theoretical_upper）。也可在 params.yaml 用
+    # device_theoretical_upper 手动覆盖。
+    auto_device_theoretical_upper = 2.0 * float(calibration_upper) if calibration_upper is not None else None
     if param_def is not None:
-        dead = param_def.dead_bound(auto_device_dead)
+        theo_upper = param_def.theoretical_upper(auto_device_theoretical_upper)
     else:
-        dead = auto_device_dead
+        theo_upper = auto_device_theoretical_upper
 
     params = dict(model_params or {})
     # 潜变量模型（PLS/PCR）：未显式给 n_components 时，按 CV 遍历 1..k 取交叉验证
     # 误差最小的维数（PLS_toolbox routine）。显式给了就以手填为准。
     if model_meta(model_key).get("family") == "latent" and "n_components" not in params:
         params["n_components"] = select_n_components(
-            X, y, model_key=model_key, folds=folds, day_idx=day_idx,
+            X, y, model_key=model_key, folds=folds, day_idx=day,
             cv=cv, cv_window=cv_window)
 
     wrapped = WaterQualityModel(
         build_model(model_key, **params),
         lower_bound=param_def.lower_bound if param_def else None,
-        upper_bound=param_def.upper_bound if param_def else None,
-        dead_bound=dead,
+        review_upper=param_def.review_upper if param_def else None,
+        theoretical_upper=theo_upper,
     )
     wrapped.fit(X, y)
 
-    rmse_cv = _cv_rmse(X, y, model_key, params, day_idx=day_idx, cv=cv,
+    rmse_cv = _cv_rmse(X, y, model_key, params, day_idx=day, cv=cv,
                        folds=folds, cv_window=cv_window)
     return ModelCard(
         model_key=model_key,
@@ -191,12 +205,12 @@ def train_model(
         preproc_chain=pipe.to_config(),
         wavelengths=[float(w) for w in spectra.wavelengths],
         instrument_id=instrument_id,
-        data_version=data_fingerprint(spectra.X, y),
+        data_version=data_fingerprint(X_raw, y),
         fom={"rmse_cv": rmse_cv,
              "rmse_fit": float(np.sqrt(np.mean(
                  (y - wrapped.predict_raw(X)) ** 2)))},
         params=params,
-        dead_bound=dead,
+        theoretical_upper=theo_upper,
     )
 
 
