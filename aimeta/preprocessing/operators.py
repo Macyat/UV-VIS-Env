@@ -6,6 +6,9 @@
 - ``wavelet``     sym 小波软阈值去噪（edge 端委托执行，需 PyWavelets）
 - ``snv``         标准正态变换，**严格逐条光谱**
 - ``msc``         多元散射校正
+- ``whittaker``   Whittaker 平滑（Eilers 2003，PLS_Toolbox ``wsmooth`` 同源）
+- ``baseline``    非对称最小二乘(ALS)基线扣除（Eilers & Boelens 2005）
+- ``wlsbaseline`` 加权最小二乘基线扣除（ALS 底层入口，对齐 PLS_Toolbox 命名）
 - ``mean_center`` / ``column_scale``  列缩放
 
 使用约定：
@@ -20,6 +23,8 @@ from typing import Optional
 import numpy as np
 import pywt
 from scipy.signal import savgol_filter
+from scipy.sparse import diags, eye as sparse_eye
+from scipy.sparse.linalg import spsolve
 
 from ..core.registry import PREPROC
 from .base import Transformer
@@ -145,6 +150,79 @@ def msc_transform(X: np.ndarray, reference: Optional[np.ndarray] = None) -> np.n
 
 
 # --------------------------------------------------------------------------
+# 基线校正（Eilers 方法：Whittaker 平滑 + 非对称最小二乘 ASLS）
+# 注意：ASLS（Asymmetric，基线）与 MCR-ALS 的交替最小二乘（Alternating）是两回事。
+# 与 PLS_Toolbox 的 wsmooth / baseline / wlsbaseline 同源，独立实现。
+# --------------------------------------------------------------------------
+
+
+def _diff_matrix(n: int, d: int):
+    """d 阶差分矩阵 D（shape (n-d, n)，CSC 稀疏）。D_d = D_1 连续应用 d 次。"""
+    D = sparse_eye(n, format="csc")
+    for _ in range(d):
+        D = D[1:, :] - D[:-1, :]
+    return D.tocsc()
+
+
+def _whittaker_row(x: np.ndarray, lam: float, DtD, n: int) -> np.ndarray:
+    """单条光谱 Whittaker 平滑：z = (I + λ DᵀD)⁻¹ x。"""
+    return spsolve(sparse_eye(n, format="csc") + lam * DtD, x)
+
+
+def _asls_row(x: np.ndarray, lam: float, p: float, DtD, n: int, n_iter: int) -> np.ndarray:
+    """单条光谱非对称最小二乘(ALS)基线：迭代 (W + λ DᵀD) z = W x。
+
+    每轮把残差为正（信号峰，位于基线之上）的点权重压到 ``p``，
+    残差非正（基线）的点权重放到 ``1-p``，从而只拟合峰下方的基线。
+    """
+    w = np.ones(n)
+    z = x.copy()
+    for _ in range(n_iter):
+        z = spsolve((diags(w, 0, format="csc") + lam * DtD).tocsc(), w * x)
+        w = np.where(x > z, p, 1.0 - p)
+    return z
+
+
+def whittaker_smooth(X: np.ndarray, lam: float = 1e4, d: int = 2) -> np.ndarray:
+    """Whittaker 平滑（逐条光谱）。返回平滑后的信号（保留峰形与基线）。"""
+    X = np.asarray(X, dtype=np.float64)
+    if X.ndim != 2:
+        raise ValueError("whittaker_smooth expects a 2-D (n_samples, n_wavelengths) array")
+    if lam <= 0:
+        raise ValueError(f"lam 必须为正，收到 {lam}")
+    if d < 1:
+        raise ValueError(f"d 必须 ≥ 1，收到 {d}")
+    n = X.shape[1]
+    D = _diff_matrix(n, d)
+    DtD = (D.T @ D).tocsc()
+    out = np.empty_like(X)
+    for i in range(X.shape[0]):
+        out[i] = _whittaker_row(X[i], lam, DtD, n)
+    return out
+
+
+def asls_baseline(X: np.ndarray, lam: float = 1e6, p: float = 1e-3,
+                 d: int = 2, n_iter: int = 10) -> np.ndarray:
+    """非对称最小二乘(ASLS)基线扣除（逐条光谱）。返回 X - baseline。"""
+    X = np.asarray(X, dtype=np.float64)
+    if X.ndim != 2:
+        raise ValueError("asls_baseline expects a 2-D (n_samples, n_wavelengths) array")
+    if lam <= 0:
+        raise ValueError(f"lam 必须为正，收到 {lam}")
+    if not (0.0 < p < 1.0):
+        raise ValueError(f"p 必须在 (0,1)，收到 {p}")
+    if d < 1:
+        raise ValueError(f"d 必须 ≥ 1，收到 {d}")
+    n = X.shape[1]
+    D = _diff_matrix(n, d)
+    DtD = (D.T @ D).tocsc()
+    out = np.empty_like(X)
+    for i in range(X.shape[0]):
+        out[i] = X[i] - _asls_row(X[i], lam, p, DtD, n, n_iter)
+    return out
+
+
+# --------------------------------------------------------------------------
 # 注册为 Transformer
 # --------------------------------------------------------------------------
 
@@ -251,3 +329,109 @@ class ColumnScale(Transformer):
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         return (np.asarray(X, dtype=np.float64) - self.mean_) / self.scale_
+
+
+@PREPROC.register("osc", family="orthogonal", compilable=False)
+class OSC(Transformer):
+    """正交信号校正（OSC，§3.11）：去除 X 中与 y 正交（无关）的变异。
+
+    用 Xᵀy 方向提取得分，再对 y 正交化后从 X 减去，逐成分迭代。用于剔除温度、
+    基体等与浓度无关的变异。``fit`` 需要 ``y``（监督式）。
+    """
+
+    op = "osc"
+
+    def __init__(self, n_components: int = 1, tol: float = 1e-6):
+        super().__init__(n_components=n_components, tol=tol)
+        self.W_: Optional[np.ndarray] = None   # (p, k) 权重
+        self.P_: Optional[np.ndarray] = None   # (p, k) 载荷
+        self.mean_: Optional[np.ndarray] = None
+
+    def fit(self, X: np.ndarray, y=None) -> "OSC":
+        if y is None:
+            raise ValueError("OSC 需要 y（监督式正交信号校正）")
+        X = np.asarray(X, dtype=np.float64)
+        y = np.asarray(y, dtype=np.float64).ravel()
+        self.mean_ = X.mean(axis=0)
+        Xc = X - self.mean_
+        yc = y - y.mean()
+
+        W: list = []
+        P: list = []
+        for _ in range(self.params["n_components"]):
+            w = Xc.T @ yc
+            nw = float(np.linalg.norm(w))
+            if nw < 1e-12:
+                break
+            w = w / nw
+            t = Xc @ w
+            # 得分对 y 正交化
+            t_orth = t - yc * float(yc @ t) / float(yc @ yc)
+            nt = float(np.linalg.norm(t_orth))
+            if nt < self.params["tol"]:
+                break
+            p = Xc.T @ t_orth / (t_orth @ t_orth)
+            W.append(w)
+            P.append(p)
+            Xc = Xc - np.outer(t_orth, p)
+
+        self.W_ = np.array(W).T if W else np.zeros((X.shape[1], 0))
+        self.P_ = np.array(P).T if P else np.zeros((X.shape[1], 0))
+        return self
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        Xt = np.asarray(X, dtype=np.float64) - self.mean_
+        for k in range(self.W_.shape[1]):
+            t = Xt @ self.W_[:, k]
+            Xt = Xt - np.outer(t, self.P_[:, k])
+        return Xt
+
+
+@PREPROC.register("whittaker", family="smooth", compilable=True)
+class Whittaker(Transformer):
+    """Whittaker 平滑（Eilers 2003，与 PLS_Toolbox ``wsmooth`` 同源）。"""
+
+    op = "whittaker"
+
+    def __init__(self, lam: float = 1e4, d: int = 2):
+        super().__init__(lam=lam, d=d)
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        return whittaker_smooth(X, lam=self.params["lam"], d=self.params["d"])
+
+
+@PREPROC.register("baseline", family="baseline", compilable=True)
+class Baseline(Transformer):
+    """非对称最小二乘(ASLS)基线扣除（Eilers & Boelens 2005；PLS_Toolbox ``baseline``）。
+
+    用非对称权重把「信号峰」压低、只拟合峰下方的基线，再减去。用于剔除
+    浊度散射导致的基线抬升/弯曲。参数名对齐 PLS_Toolbox：``order``=差分阶、
+    ``itermax``=迭代次数、``p``=非对称权重（0<p<1，越小越贴底部）。
+    """
+
+    op = "baseline"
+
+    def __init__(self, order: int = 2, lam: float = 1e6, itermax: int = 10, p: float = 1e-3):
+        super().__init__(order=order, lam=lam, itermax=itermax, p=p)
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        return asls_baseline(X, lam=self.params["lam"], p=self.params["p"],
+                            d=self.params["order"], n_iter=self.params["itermax"])
+
+
+@PREPROC.register("wlsbaseline", family="baseline", compilable=True)
+class WLSBaseline(Transformer):
+    """加权最小二乘基线扣除（PLS_Toolbox ``wlsbaseline`` 同源，ASLS 底层入口）。
+
+    与 ``baseline`` 同算法，但直接暴露差分阶 ``d`` 与迭代次数 ``n_iter``，
+    便于按 PLS_Toolbox 手册的 ``wlsbaseline(x, lam, p, d)`` 一一对照调参。
+    """
+
+    op = "wlsbaseline"
+
+    def __init__(self, lam: float = 1e6, p: float = 1e-3, d: int = 2, n_iter: int = 10):
+        super().__init__(lam=lam, p=p, d=d, n_iter=n_iter)
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        return asls_baseline(X, lam=self.params["lam"], p=self.params["p"],
+                            d=self.params["d"], n_iter=self.params["n_iter"])

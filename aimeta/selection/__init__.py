@@ -5,5 +5,7 @@
 """
 from .base import SelectorBase, permutation_test
 from .cars import CARS
+from .uve import UVE
+from .design import diagonal_design
 
-__all__ = ["SelectorBase", "permutation_test", "CARS"]
+__all__ = ["SelectorBase", "permutation_test", "CARS", "UVE", "diagonal_design"]

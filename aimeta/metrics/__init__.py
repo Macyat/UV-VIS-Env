@@ -13,10 +13,12 @@ from .water_standards import (
     WaterParam, classify, misclassification_matrix,
     daily_r2, alarm_accuracy, acceptance_report,
 )
+from .preprocessing_eval import evaluate_preprocessing
 
 __all__ = [
     "regression_vector", "sensitivity", "analytical_sensitivity",
     "selectivity", "figures_of_merit",
     "WaterParam", "classify", "misclassification_matrix",
     "daily_r2", "alarm_accuracy", "acceptance_report",
+    "evaluate_preprocessing",
 ]

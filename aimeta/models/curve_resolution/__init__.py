@@ -7,5 +7,6 @@
 """
 from .initializers import simplisma, orthogonal_projection
 from .mcr_als import MCRALS
+from .afs import afs_lawton_sylvestre
 
-__all__ = ["simplisma", "orthogonal_projection", "MCRALS"]
+__all__ = ["simplisma", "orthogonal_projection", "MCRALS", "afs_lawton_sylvestre"]

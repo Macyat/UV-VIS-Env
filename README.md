@@ -9,11 +9,21 @@ modeling, and online deployment on industrial PCs alike.
 
 Supported water-quality parameters: CODMn, COD, TN, TP, ammonia nitrogen (AN), and turbidity (TUR).
 
+### Acknowledgements
+
+This library is informed by the chemometrics literature; in particular, we acknowledge:
+
+> **Comprehensive Chemometrics: Chemical and Biochemical Data Analysis** — Steven Brown, Romà Tauler &
+> Beata Walczak (eds.), Elsevier. Widely regarded as the spiritual successor to Massart's *Chemometrics:
+> A Textbook* (1988) and the *Handbook of Chemometrics and Qualimetrics*, Parts A/B (1998), growing from
+> 488 pages to 2,958 pages across four volumes in its second edition (2020).
+>
+> — *Analytical and Bioanalytical Chemistry*: "essential for researchers working in the field."
+> — *Spectroscopy Europe*: "well worthy of a place in any analytical science library."
+
 > **Terminology**: this library makes heavy use of spectrometric-metrology and Chinese-national-standard
 > terms (FOM, blank, theoretical upper, review limit, acceptance rate, daily R², etc.). Before reading the code or
 > configuration, please skim [`docs/术语表.md`](docs/术语表.md) to avoid mixing up definitions.
-> Quality evaluation has two layers — **analytical-method figures of merit (FOM)** and **spectrometer hardware
-> evaluation**; see the section "Quality Evaluation: Analytical Method and Instrument Hardware".
 
 ---
 
@@ -279,6 +289,9 @@ Available operators:
 | `deriv_gram` | Gram-polynomial smoothing / derivative (numerically equivalent to `savgol`) | yes |
 | `snv` | standard normal variate (per spectrum) | yes |
 | `msc` | multiplicative scatter correction | yes |
+| `whittaker` | Whittaker smoothing (Eilers 2003, cf. PLS_Toolbox `wsmooth`) | yes |
+| `baseline` | asymmetric least-squares (ALS) baseline removal (Eilers & Boelens 2005) | yes |
+| `wlsbaseline` | weighted least-squares baseline removal (ALS, low-level entry) | yes |
 | `mean_center` / `column_scale` | column centering / column scaling | yes |
 | `wavelet` | wavelet soft-threshold denoising (`sym4`) | yes (requires PyWavelets) |
 
@@ -667,7 +680,7 @@ the verification regulation. Main bases: **JJG 178** and **ASTM E275**.
 | Baseline flatness | air / blank (100%T reference) | repeat the 100%T reference line multiple times; per-wavelength std across repeats gives baseline repeatability `repeatability_max`; if `ideal` is given, also compute the max deviation `deviation_max` of the mean baseline from `ideal` (`baseline_flatness`). | repeatability ≤ 0.001 (example) |
 | SNR | stable light source / pure water (or any known stable signal) | repeat >= 10 times under the same conditions; at a specified wavelength (or full-band mean), `SNR = signal mean / repeat std` (ddof=1); returns `inf` when noise is 0 (`signal_to_noise`). | higher is better |
 | Resolution | narrow emission-line source such as mercury / argon lamp | measure the emission-line spectrum; parabolic-refine the peak height within peak ±window; linear-interpolate the full width at half maximum FWHM (nm) (`resolution`). | FWHM ≤ 2 nm (typical for 1 nm slit) |
-| Standard-solution linearity (per wavelength) | none | measure multi-concentration gradient spectra of various standards; from the third concentration onward, do per-wavelength linear regression and compute cumulative R² (progressively accumulate fits along the concentration gradient; per wavelength via `sklearn.metrics.r2_score` or `np.polyfit`); output the per-wavelength R² curve. | judge qualitatively by the R² curve, and use contiguous high-R² bands (e.g. ≥ 0.999) to determine the linear range. |
+| Standard-solution linearity (per wavelength) | none | measure multi-concentration gradient spectra of various standards; from the third concentration onward, do per-wavelength linear regression and compute cumulative R² (progressively accumulate fits along the concentration gradient; per wavelength via `sklearn.metrics.r2_score` or `np.polyfit`); output the per-wavelength R² curve. | judge qualitatively by the R² curve, and use contiguous high-R² bands (e.g. ≥ 0.99) to determine the linear range. |
 
 #### Reference Implementation
 ```python

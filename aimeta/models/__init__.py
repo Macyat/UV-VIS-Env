@@ -8,6 +8,7 @@
 from .registry import MODELS, build_model, list_models
 from .wrappers import WaterQualityModel
 from . import zoo  # noqa: F401
+from . import gam  # noqa: F401  注册 GAM
 from .ensembles import fuse_predict
 
 __all__ = ["MODELS", "build_model", "list_models", "WaterQualityModel",

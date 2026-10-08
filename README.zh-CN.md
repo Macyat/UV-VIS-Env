@@ -7,9 +7,18 @@ UV-Vis 光谱水质在线监测算法库。覆盖从硬件评价、光谱预处�
 
 支持的水质参数：CODMn、COD、TN、TP、氨氮（AN）、浊度（TUR）。
 
+### 致敬
+
+> **《Comprehensive Chemometrics: Chemical and Biochemical Data Analysis》**——Steven Brown、Romà Tauler、
+> Beata Walczak 主编（Elsevier）。它被广泛视为 Massart《Chemometrics: A Textbook》(1988) 与
+> 《Handbook of Chemometrics and Qualimetrics》A/B 卷 (1998) 的精神续作，篇幅从 488 页扩展到四卷
+> 2958 页（第二版，2020）。
+>
+> 《Analytical and Bioanalytical Chemistry》："essential for researchers working in the field"；
+> 《Spectroscopy Europe》："well worthy of a place in any analytical science library"。
+
 > **术语约定**：本库大量使用光谱计量与国标专有名词（FOM、空白、理论上限、复核限、达标率、日级 R² 等）。
 > 阅读代码或配置前，请先浏览 [`docs/术语表.md`](docs/术语表.md)，避免口径混淆。
-> 质量评价分为两层——**分析方法品质因数（FOM）**与**光谱仪硬件评价**，详见「质量评价：分析方法与仪器硬件」一节。
 
 ---
 
@@ -265,6 +274,9 @@ pipe.to_config()        # [{'op': 'savgol', 'window': 15, 'polyorder': 3, 'deriv
 | `deriv_gram` | Gram 多项式平滑 / 求导（与 `savgol` 数值等价） | 是 |
 | `snv` | 标准正态变换（逐条光谱） | 是 |
 | `msc` | 多元散射校正 | 是 |
+| `whittaker` | Whittaker 平滑（Eilers 2003，同 PLS_Toolbox `wsmooth`） | 是 |
+| `baseline` | 非对称最小二乘(ALS)基线扣除（Eilers & Boelens 2005） | 是 |
+| `wlsbaseline` | 加权最小二乘基线扣除（ALS 底层入口） | 是 |
 | `mean_center` / `column_scale` | 列中心化 / 列标准化 | 是 |
 | `wavelet` | 小波软阈值去噪（`sym4`） | 是（需安装 PyWavelets） |
 
@@ -629,7 +641,7 @@ print(diag["method"], diag["shift_nm"], diag["reason"])
 | 基线平直度 | 空气 / 空白（100%T 参考，T = 透过率） | 多次重复测 100%T 参考线，逐波长跨重复 std 得基线重复性 `repeatability_max`；若给 ideal 值再算平均基线相对 ideal 的最大偏离 `deviation_max`（函数 `baseline_flatness`）。 | 重复性 ≤ 0.001（示例） |
 | 信噪比 | 稳定光源 / 纯水（或任意已知稳定信号） | 同条件重复测 ≥10 次，在指定波长（或全波段均值）上 `SNR = 信号均值 / 重复标准差`（ddof=1）；噪声为 0 时返回 `inf`（函数 `signal_to_noise`）。 | 越高越好 |
 | 分辨率 | 汞灯 / 氩灯等窄发射线光源 | 测发射线光谱，在峰 ±window 内抛物线细化峰高，线性插值求半高全宽 FWHM（nm）（函数 `resolution`）。 | FWHM ≤ 2 nm（1 nm 狭缝典型） |
-| 标液线性度（各波长） | 无 | 测各种物质标液的多浓度梯度光谱，自第三个浓度起对每个波长做线性回归并计算累计 R²（按浓度梯度逐步累加拟合，逐波长用 `sklearn.metrics.r2_score` 或 `np.polyfit` 求解）；输出各波长 R² 曲线。 | 按 R² 曲线定性判断，并结合高 R² 值连续波长区间（e.g. ≥ 0.999）判定线性范围。 |
+| 标液线性度（各波长） | 无 | 测各种物质标液的多浓度梯度光谱，自第三个浓度起对每个波长做线性回归并计算累计 R²（按浓度梯度逐步累加拟合，逐波长用 `sklearn.metrics.r2_score` 或 `np.polyfit` 求解）；输出各波长 R² 曲线。 | 按 R² 曲线定性判断，并结合高 R² 值连续波长区间（e.g. ≥ 0.99）判定线性范围。 |
 
 #### 参考实现
 ```python

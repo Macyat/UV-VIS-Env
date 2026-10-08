@@ -7,7 +7,9 @@ import numpy as np
 import pytest
 from scipy.signal import savgol_filter
 
-from aimeta.preprocessing.operators import DERIV, snv_transform, msc_transform
+from aimeta.preprocessing.operators import (
+    DERIV, snv_transform, msc_transform, whittaker_smooth, asls_baseline,
+)
 from aimeta.preprocessing.base import Pipeline
 
 
@@ -100,3 +102,52 @@ def test_wavelet_preserves_length(spectra):
     """老 utils.wavelet_denoising 返回 [1:] 会少一个点，这里必须长度不变。"""
     p = Pipeline.from_config([{"op": "wavelet", "wavelet": "sym4", "level": 2}])
     assert p.transform(spectra).shape == spectra.shape
+
+
+# ---------------------------------------------------------------------------
+# 基线校正（Whittaker 平滑 + ALS 非对称最小二乘，PLS_Toolbox 同源）
+# ---------------------------------------------------------------------------
+
+
+def test_whittaker_reduces_noise():
+    """Whittaker 平滑应让含噪信号更接近干净信号。"""
+    rng = np.random.default_rng(0)
+    x = np.arange(201)
+    clean = np.exp(-((x - 100) ** 2) / (2 * 20 ** 2))
+    noisy = clean + rng.normal(0, 0.05, 201)
+    smooth = whittaker_smooth(noisy[None, :], lam=1e4, d=2)[0]
+    assert np.mean((smooth - clean) ** 2) < np.mean((noisy - clean) ** 2)
+    assert smooth.shape == (201,)
+
+
+def test_asls_baseline_removes_linear_baseline():
+    """ALS 应扣掉线性基线，同时保留信号峰。
+
+    二阶差分（d=2）对线性基线零惩罚，故基线能被精确拟合；峰因残差为正
+    而被压低权重、不被基线吸收。
+    """
+    x = np.arange(201)
+    baseline = 0.2 + 0.005 * x
+    peak = 2.0 * np.exp(-((x - 100) ** 2) / (2 * 8 ** 2))
+    signal = baseline + peak
+    corrected = asls_baseline(signal[None, :], lam=1e3, p=0.01, d=2, n_iter=30)[0]
+    # 远离峰的纯基线区被扣到接近 0
+    assert abs(corrected[20]) < 0.05
+    # 峰高大部分保留（原高 2.0）
+    assert corrected[100] > 1.5
+
+
+def test_baseline_operators_registered(spectra):
+    """三个基线算子都注册进 PREPROC，且输出形状不变。"""
+    for op in ["whittaker", "baseline", "wlsbaseline"]:
+        p = Pipeline.from_config([{"op": op}])
+        assert p.transform(spectra).shape == spectra.shape
+
+
+def test_asls_baseline_rejects_bad_params(spectra):
+    with pytest.raises(ValueError):
+        asls_baseline(spectra, lam=0)
+    with pytest.raises(ValueError):
+        asls_baseline(spectra, p=1.5)
+    with pytest.raises(ValueError):
+        asls_baseline(spectra, d=0)

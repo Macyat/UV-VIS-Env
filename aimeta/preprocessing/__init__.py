@@ -7,9 +7,13 @@
 """
 from .base import Transformer, Pipeline, build_chain
 from . import operators  # noqa: F401  触发算子注册
-from .operators import DERIV, savgol, wavelet_denoise, snv_transform, msc_transform
+from .operators import (
+    DERIV, savgol, wavelet_denoise, snv_transform, msc_transform,
+    whittaker_smooth, asls_baseline,
+)
 
 __all__ = [
     "Transformer", "Pipeline", "build_chain",
     "DERIV", "savgol", "wavelet_denoise", "snv_transform", "msc_transform",
+    "whittaker_smooth", "asls_baseline",
 ]
